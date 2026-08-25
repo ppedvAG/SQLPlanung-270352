@@ -1,5 +1,23 @@
 --Warnungen
 
+
+/* SQL Server Alerts  bzw Warnungen
+SQL Server Alerts sind automatische Benachrichtigungs- und Reaktionsmechanismen, 
+die vom SQL Server Agent bereitgestellt werden. Sie überwachen das Datenbanksystem
+kontinuierlich und lösen definierte Aktionen aus, 
+sobald ein bestimmtes Ereignis, ein Fehler 
+oder ein Leistungsschwellenwert erreicht wird.
+
+Alert-Typ                   | Auslöser / Beschreibung                                                                                                 | Typisches Beispiel
+----------------------------+-------------------------------------------------------------------------------------------------------------------------+---------------------------------------------------------
+SQL Server Event Alert      | Reagiert auf Ereignisse im Windows-Anwendungs- oder SQL Server-Fehlerprotokoll basierend auf Fehlernummer/Schweregrad.   | Schwerer Hardware-/I/O-Fehler (Fehler 825, Severity 19–25)
+Performance Condition Alert | Löst aus, wenn ein Leistungsindikator (Performance Counter) einen definierten Schwellenwert über- oder unterschreitet.  | CPU-Auslastung > 90 % oder tempdb-Speicherplatz < 1000 KB
+WMI Event Alert             | Reagiert auf Systemereignisse über Windows Management Instrumentation (WMI).                                            | Schema-Änderungen (ALTER/DROP TABLE) oder Deadlocks
+
+
+
+
+
 /*
 Ebenen:
 16...  DAU
