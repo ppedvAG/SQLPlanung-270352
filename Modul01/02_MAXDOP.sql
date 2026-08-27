@@ -1,94 +1,89 @@
 /*
+================================================================================
+  Modul 01 – MAXDOP (Maximum Degree of Parallelism)
+================================================================================
+  MAXDOP steuert, wie viele CPU-Kerne eine einzelne Abfrage maximal nutzen darf.
+  SQL Server kann Abfragen parallel über mehrere Kerne verteilen, um sie
+  schneller zu berechnen. Dabei gilt: mehr Kerne sind nicht immer schneller –
+  der Koordinationsaufwand (Exchange-Operatoren) kostet ebenfalls Zeit.
 
-MAXDOP 
+  Hierarchie der MAXDOP-Einstellungen (von geringster zu höchster Priorität):
+    1. Server-Einstellung (sp_configure 'max degree of parallelism')
+    2. Datenbank-Einstellung (ALTER DATABASE SCOPED CONFIGURATION SET MAXDOP)
+    3. Abfrage-Hint (OPTION (MAXDOP n)) – hat immer Vorrang
 
-Abfragen k�nnen eine oder mehr CPUs verwenden
+  Empfehlung (SQL Server 2016+):
+    - Kostenschwellwert für Parallelismus auf 25–50 setzen (Standard: 5)
+    - MAXDOP = Anzahl der logischen Prozessoren pro NUMA-Knoten (max. 8)
+    - Für Data-Warehouse-Workloads können höhere Werte sinnvoll sein.
 
-Wird eine Abfrage schneller fertig sein, wenn mehr CPUs sie verarbeiten?
-Normalerweise schon .. macht Sinn!
-
-SQL verwendet allerdings keine variable Anzah an Kernen. (Erst SQL 2022 ist dazu lernf�hig)
-SQL verwendet 1 oder alle Kerne bzw das was in MAXDOP angegeben ist.
-
-Seit SQL 2016: Standardwert statt 0 nun Anzagh der Kerne , aber max 8
-
-
-
+  Seit SQL Server 2016 kann MAXDOP auch pro Datenbank eingestellt werden.
+  Seit SQL Server 2022 ist SQL Server in der Lage, MAXDOP adaptiv zu steuern.
+================================================================================
 */
 
+-- I/O- und Zeitstatistiken aktivieren
+-- IO   = Anzahl der gelesenen 8-KB-Seiten (entspricht RAM-Verbrauch 1:1)
+-- time = Ausführungsdauer in Millisekunden (CPU-Zeit + Wartezeit)
+SET STATISTICS IO, TIME ON;
 
-set statistics io, time on
---IO = Anzahl der Seiten--> 1:1 RAM
---time Dauer in ms   CPU ms
+-- ============================================================================
+-- Beispielabfrage: Frachtkosten je Land und Stadt
+-- Tabelle KU enthält ca. 62.000 Seiten (~496 MB)
+-- ============================================================================
+SELECT   ShipCountry,
+         ShipCity,
+         SUM(Freight) AS GesamtFracht
+FROM     KU
+GROUP BY ShipCountry, ShipCity
+OPTION   (MAXDOP 6);     -- Diese Abfrage nutzt maximal 6 Kerne
+-- Messergebnisse (Beispielwerte):
+--   8 Kerne: CPU-Zeit = 923 ms, verstrichene Zeit =  144 ms
+--   1 Kern:  CPU-Zeit = 406 ms, verstrichene Zeit =  419 ms
+--   4 Kerne: CPU-Zeit = 625 ms, verstrichene Zeit =  166 ms
+--
+-- Fazit: Mehr Kerne senken die Laufzeit (verstrichene Zeit),
+--        erhöhen aber die gesamte CPU-Zeit (Parallelisierungs-Overhead).
+--        Am Ende entscheidet der Anwendungsfall.
 
+-- ============================================================================
+-- Parallelisierungs-Wartezeiten prüfen
+-- CX-Waits zeigen Wartezeiten durch Parallelismus (Exchange-Operatoren)
+-- ============================================================================
+SELECT *
+FROM   sys.dm_os_wait_stats
+WHERE  wait_type LIKE 'CX%';
 
+-- ============================================================================
+-- Dieselbe Abfrage mit explizitem MAXDOP 8
+-- ============================================================================
+SELECT   Country,
+         City,
+         SUM(Freight) AS GesamtFracht
+FROM     KU
+GROUP BY Country, City
+OPTION   (MAXDOP 8);
 
+-- Prioritätsregel:
+--   Server-MAXDOP(4) → DB-MAXDOP(6) → Abfrage-MAXDOP(8)  →  es gilt: 8
+--   Der MAXDOP näher an der Abfrage hat immer Vorrang.
 
-select shipcountry, shipcity, SUM(freight) from KU  --62000 Seiten
-group by shipcountry, shipcity
-option  (maxdop 6)
---mit 8 Kernen: , CPU-Zeit = 923 ms, verstrichene Zeit = 144 ms.
---1 Kern: , CPU-Zeit = 406 ms, verstrichene Zeit = 419 ms.
---4 Kerne: , CPU-Zeit = 625 ms, verstrichene Zeit = 166 ms.
+-- ============================================================================
+-- Empfehlung: MAXDOP auf Datenbankebene setzen (ab SQL Server 2016)
+-- ============================================================================
+-- Kostenschwellwert für Parallelismus empfehlung: 25
+-- → Abfragen unter 25 Kosteneinheiten werden nicht parallelisiert
 
-
-SQL Server-Analyse- und Kompilierzeit: 
-, CPU-Zeit = 175 ms, verstrichene Zeit = 175 ms.
-
---SQL Server-Analyse- und Kompilierzeit: 
---, CPU-Zeit = 175 ms, verstrichene Zeit = 175 ms.
---56863  -- *8 
---, CPU-Zeit = 1110 ms, verstrichene Zeit = 156 ms.
-
---MAXDOP = 0 = alle
---MAXDOP Server = 8 
---MAXDOP DB = 4
---MAXDOP ABfrage = 1 
-
--- CPU-Zeit = 374 ms, verstrichene Zeit = 52 ms.
---nur ein Grund daf�r.. mehr CPUs haben was getan.. 
---scheint Sinn gemacht zu haben
-
-select * from sys.dm_os_wait_stats		   
-where wait_type like 'CX%'
-
-
-select country, city, SUM(freight) from ku  --62000 Seiten
-group by country, city  option (maxdop 8)
-
---Fakt: Am Ende z�hlt der MAXDOP, der n�her an der Abfrage dran ist
--- Server(4)-->DB(6)--Abfrage(8)-- es z�hlt 8
-
-
---Was sollte man einstellen: 
--- der Kostenschwellwert sollte bei 25 sein.. und dann experimentieren
---bei Datawarehouse kann die Zahl abweichen
-
---SQL 2012: 5 und 0 (alle CPUs)
-
---im Plan Doppelpfeil
-
---Dass SQL Server paralelisiert m�ssen 2 Bedingungen erf�llt sein
--- Bed 1: wenn der Kostenschwellwert �berschritten wurde: default bei 5
---       dann werden rigoros alle CPUs verwendet
-
--- Seit SQL 2019 (Setup) wird folgendes vorgeschlagen: alle Prozessoren ,
----aber nicht mehr als 8 
-
---W�ren nicht weniger besser gewesen?
-
---Tats�chlich ist es eher pro Abfrage zu entscheiden, was besser ist.
---Fakt: meist kommt man mit weniger CPUs gleich schnell weg und spart 
---zeitgleich CPU Leistung
---Taskmanager sollte eine Reduzierung der Prozesssorzeit zeigen
-
---Siet SQL 2016 l��t dich der MAXDOP auch pro DB einstellen
-
-USE [master]
+USE [Northwind];
 GO
-
-GO
-USE [Northwind]
-GO
+-- MAXDOP für diese Datenbank auf 4 begrenzen
 ALTER DATABASE SCOPED CONFIGURATION SET MAXDOP = 4;
 GO
+
+-- ============================================================================
+-- MAXDOP-Übersicht
+-- ============================================================================
+-- MAXDOP =  0  → alle verfügbaren Kerne (kein Limit)
+-- MAXDOP =  1  → keine Parallelisierung (serielle Ausführung)
+-- MAXDOP =  8  → max. 8 Kerne (empfohlene Obergrenze)
+-- Server-MAXDOP < DB-MAXDOP < Abfrage-MAXDOP  (letzterer hat Vorrang)

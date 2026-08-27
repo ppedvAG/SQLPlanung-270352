@@ -1,89 +1,108 @@
-USE [master]
+/*
+================================================================================
+  Modul 05 – Datenbank-Snapshots (Database Snapshots)
+================================================================================
+  Ein Datenbank-Snapshot ist eine schreibgeschützte, statische Sicht auf eine
+  Datenbank zu einem bestimmten Zeitpunkt. Snapshots nutzen Copy-on-Write:
+  Geänderte Seiten werden erst in den Snapshot kopiert, wenn sie in der
+  Originaldatenbank verändert werden.
+
+  Wichtige Eigenschaften:
+  - Snapshots sind NICHT sicherbar (kein BACKUP DATABASE möglich)
+  - Die Originaldatenbank KANN gesichert werden (unabhängig vom Snapshot)
+  - Mehrere Snapshots einer Datenbank gleichzeitig möglich
+  - Ein Snapshot KANN NICHT direkt wiederhergestellt werden (kein normaler Restore)
+  - Die Originaldatenbank KANN aus einem Snapshot wiederhergestellt werden,
+    aber NUR wenn ALLE anderen Snapshots dieser DB vorher gelöscht werden
+
+  Typischer Anwendungsfall:
+  - Vor einer riskanten Aktion (z. B. großes UPDATE) einen Snapshot erstellen
+  - Bei Fehler: Datenbank aus dem Snapshot wiederherstellen (schnell!)
+  - Unterschiede zwischen Original und Snapshot analysieren (EXCEPT)
+
+  Einschränkungen:
+  - Wächst mit jeder Änderung in der Originaldatenbank (Copy-on-Write)
+  - Auf demselben SQL Server wie die Originaldatenbank
+================================================================================
+*/
+
+USE [master];
 GO
-ALTER DATABASE northwind SET  Multi_USER WITH NO_WAIT
+
+-- ============================================================================
+-- Alle Benutzer aus einer Datenbank trennen (für Admin-Aufgaben)
+-- ============================================================================
+ALTER DATABASE northwind SET MULTI_USER WITH NO_WAIT;
 GO
 
-GO
-
-
--- =============================================
--- Create Database Snapshot Template
--- =============================================
-USE master
-GO
-
-
--- Create the database snapshot
+-- ============================================================================
+-- Snapshot erstellen (Syntaxvorlage)
+-- ============================================================================
+-- NAME     = logischer Name der Datendatei der Originaldatenbank
+-- FILENAME = Pfad + Dateiname der neuen Snapshot-Datei (.mdf)
+-- SNAPSHOT OF = Name der Originaldatenbank
 CREATE DATABASE SnapshotDBName ON
-( NAME = logNamederOrgDatendatei, 
-FILENAME = 'PfadundDateiname der Snapshotdatendatei.mdf')
-AS SNAPSHOT OF OrgDb;
-GO
-
-create database  nw_1616
-ON
 (
-	NAME=Northwind, --alte mdf
-	FILENAME='c:\_SQLDATA\nw_1616 .mdf'  --StdPfad des SQL Server
-)   as snapshot of northwind
-
-
-use northwind;
+    NAME     = LogischerNameDerOrigDatendatei,
+    FILENAME = 'C:\PfadZumSnapshot\SnapshotDBName.mdf'
+)
+AS SNAPSHOT OF OrigDB;
 GO
 
-update customers set city = 'XXX' where customerid = 'ALFKI'
-
-select * from customers
-
-
---Snapshot-----------------TSQL
-
---Kann man mehrere SN machen?
---ja
-
---Kann man einen SN backupen?
---N�
-
---Kann man die OrgDB backupen?
---Ja klar
-
-select * from Northwind..customers
-except
-select * from [SN_nwind_1220]..customers
-
-
---kann man den SN restoren?
---n�
-
---kann man die OrgDB restoren?
---jein--kein normaler restore
---f�r den normal restore m�ssen alle SN gel�scht werden
---Restore von SN m�glich
-
---alle user m�ssen von allen DBs (northwind und Snapshot) verscheucht werden
-use master;
+-- ============================================================================
+-- Konkretes Beispiel: Snapshot der Northwind-Datenbank
+-- ============================================================================
+-- Snapshot zum Zeitpunkt 16:16 Uhr erstellen
+CREATE DATABASE nw_1616 ON
+(
+    NAME     = Northwind,            -- logischer Name der Northwind-Datendatei
+    FILENAME = 'C:\_SQLDATA\nw_1616.mdf'
+)
+AS SNAPSHOT OF northwind;
 GO
 
---der Restore geht nur, wenn alle Connections beendet wurden
+-- ============================================================================
+-- Demo: Änderung in der Originaldatenbank
+-- ============================================================================
+USE northwind;
+GO
 
-restore database northwind
-from database_snapshot ='nw_1616'
+-- Stadt des Kunden ALFKI ändern (zum Testen des Snapshots)
+UPDATE Customers
+SET    City = 'XXX'
+WHERE  CustomerID = 'ALFKI';
 
+-- Geänderte Daten anzeigen
+SELECT * FROM Customers WHERE CustomerID = 'ALFKI';
 
-select * from sysprocesses where spid > 50 and dbid in(11,5)
+-- ============================================================================
+-- Unterschied zwischen Original und Snapshot zeigen
+-- ============================================================================
+-- EXCEPT zeigt alle Zeilen, die in Original, aber NICHT im Snapshot vorhanden sind
+SELECT * FROM Northwind..Customers
+EXCEPT
+SELECT * FROM [nw_1616]..Customers;
 
-select db_id('nw_1400')
+-- ============================================================================
+-- Aktive Verbindungen prüfen
+-- ============================================================================
+-- Alle Verbindungen zur Northwind-DB und dem Snapshot anzeigen
+SELECT *
+FROM   sysprocesses
+WHERE  spid > 50
+  AND  dbid IN (DB_ID('northwind'), DB_ID('nw_1616'));
 
-kill 56
+-- ============================================================================
+-- Datenbank aus Snapshot wiederherstellen
+-- ============================================================================
+-- Voraussetzung: ALLE aktiven Verbindungen zur Originaldatenbank und zum
+--               Snapshot müssen vorher getrennt werden!
+--               Alle anderen Snapshots dieser DB müssen ebenfalls gelöscht sein.
 
+USE master;
+GO
 
---oder so 
-
---alle laufenden Prozesse der Benutzer
-select * from sysprocesses 
-	where 
-			spid > 50 AND
-			dbid in (db_id('northwind'), db_id('SN_nwind_1220'))
-
-
-kill 81
+-- Datenbank aus dem Snapshot wiederherstellen
+RESTORE DATABASE northwind
+FROM DATABASE_SNAPSHOT = 'nw_1616';
+GO

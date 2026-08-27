@@ -1,196 +1,106 @@
---Überwachung
-
 /*
-aktuelles Problem
-
-Taskmanager
-mslaugh.exe teakids.exe
-..ist es der SQL Server oder nicht
-
---es ist der SQL Server!!
-
-Taskmanager für den SQL Server:  Aktivitätsmonitor
-
-
-select * from sys.dm_os_wait_stats
-
-Wenn signal_time > 25% der gesamten DAuer ausmacht ==> CPU Problem
-Blöd: die Zeiten sind seit NEustart kummilierend!
-
-Seit wann läuft der Server?
-tempdb Erstellungszeit
-
-besser: alle wait_time addieren
-
-
-
---Monitoring
-
---live Problem
----- Reihenfolge für Monitoring
---1.  Taskmanager: Ausschluss andere Dinge (Anitvirentool, Viren, Trojaner..)
----    zB mslaugh.exe   teakids.exe mit Admin acount
---> nix gefunden...-->SQL Server 
-
---2 SQL Server genauer anschauen
--->   Aktivitätsmonitor  
-----> Wartezustände.. worauf warten aktuell. innerhalb der letzten Sekunden bzw in der letzten Zeit
--------> damit haben wir schon mal die Richtung , in der wir weitersehen müssen.
-
---für genauere Infos: auch der Aktivitätsmonitor wertet Systemsichetn aus, wie zB:
-
-select * from sys.dm_os_wait_stats
-
---wait_time = gesamte Wartezeit
---signal_time = Wartezeit auf Ressource  (= ein Teil der gesamt Wartezeit)
---alle Zeiten sind kummulierend
-
---alle Sessions mit SID > 50 sind User (auch Agent)
-
-
-select * from sys.dm_os_wait_stats
---eigtl müssten wir folgendes tun
--- wenn man alle Wartezeiten addiert = gemsamte  Laufzeit des Servers
---Wartezeit einer Ressource im Vergleich zur gesamt Laufzteit
-
---sammlet alle Wartezeiten kummulierend seit Neustart
-
-
---Wenn wir alle zB 10min die Wartenzeiten speichern, 
-
-LCK_M_S	   242	5894499	1855310	33    um 10 Uhr
-LCK_M_S	   242	5894499	1855310	33   um 10:10 
-LCK_M_S	   242	8745766	1855310	33  um 10:20
-
---------------DMVs Data Management Views-------------
--- siehe im Projekt Z_SQL_Server_2019_Diagnostic Information Queries.sql
---eine ganze Sammlung von nützlichen DMvs
-
-select * from sysprocesses --alle Prozesse der User haben ein SPID > 50
-
----------------Für eine historische Betrachtung--------------------
---ist der SQL neugestartet , sind die DMVs zurückgestzt worden. Somit wertvolle Infos weg...
---also evtl Aufzeichnen
-
-
-
----per TSQL ----------------------------------------
--- set statistics io, time on 
---sowie Abfragepläne
-
---Diese bieten wertvolle Hinweise, erfordern aber aktives Monitoring
-set statistics io,time on
-
-select * from orders where freight > 10
-
-
-select * from custorders where id = 100
---250ms CPU .. 128ms Dauer... 60240 Seiten
-
---nach QueryStore und IX Vorschlag aus dem QueryStore
---, CPU-Zeit = 0 ms, verstrichene Zeit = 0 ms.
---Seiten : 4 
-
-
-
-
-
-
-----Meldung: Problem SQL langsam
-
-
-/*
-
---Aktivitätsmonitor------------------------------
-Was geht .. auf Server--> Taskmanager +  Ressourcemonitor
-
-==> wo geht die Leistung hin?  --> ? Antivirentool, Trojanerquark, andere Tools, Software
-
---Was wenn keine Engpässe erkennbar oder deutlich auf SQL Server hinweist?
---> Taskmanager für SQL Server: Aktivitätsmonitor
-
---Dort kann man die aktiven Prozesse der Benutzer mitverfolgen
-
-select * from sysprocesses  where spid <= 50.. alles andere = User
-
-wir finden hier also : aktive Prozessen, die Wartezeiten und Warteressourcen, die IO Aktivtäten,  Die teruersten aktiven bzw vergangenen Abfragen 
-
---------------------------------------------------------------
-
-
-
----jedes Tool im SQL Server basiert eigtl auf 
-----------------DMV  DataManagement Views---------------
-
-Systemsichten.. die nach dem Neustart des SQL Server geleert
---daher Systemsichten evtl wegsichern.. bzw best Abfragen
-
-oder Tools zum Aufzeichnen verwenden wie Datensammler oder QueryStore
-
-
---TOOL  DATENSAMMLER-----------------------------
-
---kann man alles per rechter Maustaste konfigurieren
-
---1: Anlegen der DatawarehouseDB
---2: Konfigurieren der DAtensammlersätze
-
---TOOL: QueryStore (Abfragespeicher)----------------
---sammlet pro DB Messdaten und Abfragen. Daten stehen auch nach Neustart noch zur  Verfügung
---grafische Auswertung in Form von Berichten
-.--muss pr DB aktiviert werden
---> Sehr cool...daher: Query Store merkt sich , fast unscheinbar - die Messwerte und Pläne, und bereitet die grafisch auf... auf Dauer
---> muss alerdings aktiviert werden
-
---QueryStore Abfragespeicher: sammlet Abfragen der DB plus rel viele Messungen
-			--> aber nicht wer
-
-
---TOOL Perfmon (NT): Messwerte einer SQLInstanz und Windows Messwerte------------------------------
----------> Grafische Auswertung.. sehr leicht um Problem zu erkennen
-
---TOO Profiler: Tool um Abfragen aufzuzeichen--------------------------------------------------
-
-
-
+================================================================================
+  Modul 10 â€“ SQL Server Monitoring und Performance-Diagnose
+================================================================================
+  Dieses Skript zeigt einen strukturierten Ansatz zur Diagnose von
+  SQL Server-Performanceproblemen. Es erlÃ¤utert, welche Tools wann
+  einzusetzen sind und demonstriert die wichtigsten DMV-Abfragen.
+
+  Diagnose-Reihenfolge (von auÃŸen nach innen):
+  1. Taskmanager: Ausschluss anderer Ursachen (Antivirensoftware, andere Prozesse)
+  2. AktivitÃ¤tsmonitor: Live-Ãœberblick Ã¼ber SQL Server-AktivitÃ¤ten
+  3. DMVs: Detaillierte Analyse (Wait Stats, laufende Abfragen, I/O-Statistiken)
+  4. Query Store / Verlaufsdaten: Historische Analyse Ã¼ber Zeitraum
+  5. Perfmon / Extended Events: Langzeitaufzeichnung und tiefe Diagnose
+
+  Wichtige DMVs fÃ¼r Monitoring:
+  - sys.dm_os_wait_stats:         Wartestatistiken (kumulativ seit Neustart)
+  - sys.dm_exec_requests:         Aktuell laufende Abfragen
+  - sys.dm_exec_sessions:         Alle Verbindungen zum Server
+  - sys.dm_db_index_usage_stats:  Nutzungsstatistiken der Indizes
+  - sys.dm_io_virtual_file_stats: I/O-Statistiken pro Datenbankdatei
+
+  Hinweis: DMVs werden beim Neustart des SQL Servers zurÃ¼ckgesetzt!
+  â†’ FÃ¼r historische Analysen regelmÃ¤ÃŸig in eine Monitoring-Tabelle sichern.
+================================================================================
 */
 
---Wie findet man Systemsichten?.. Aber es gibt auch viele, die nicht dm beginnen..:-(
-select * from sys.dm_os...    --SQL Server
-select * from sys.dm_db... --rund um Datenbanken
+-- ============================================================================
+-- 1. Wartestatistiken anzeigen (alle, kumulativ seit Neustart)
+-- ============================================================================
+-- Zeigt alle WartezustÃ¤nde inkl. systeminterner Idle-Waits.
+-- FÃ¼r gefilterte Auswertung: siehe 10_WAIT_STATS.sql
+SELECT *
+FROM   sys.dm_os_wait_stats
+ORDER BY wait_time_ms DESC;
 
---zB
-select * from sys.dm_db_index_usage_stats
+-- ============================================================================
+-- 2. Aktuell laufende Abfragen und Verbindungen anzeigen
+-- ============================================================================
+-- SPIDs > 50 sind Benutzer-Sessions (< 50 = interne SQL Server-Prozesse)
+SELECT *
+FROM   sysprocesses
+WHERE  spid > 50;
 
+-- ============================================================================
+-- 3. I/O- und Zeitstatistiken fÃ¼r einzelne Abfragen messen
+-- ============================================================================
+-- Aktivieren der detaillierten AusfÃ¼hrungsstatistiken fÃ¼r die aktuelle Session
+SET STATISTICS IO,  TIME ON;
 
+-- Beispielabfrage: Bestellungen mit Fracht > 10
+SELECT *
+FROM   Orders
+WHERE  Freight > 10;
 
-*/
+-- Beispielabfrage: Abfrage aus einer View
+-- SELECT * FROM custorders WHERE id = 100;
+-- Erwartete Ausgabe (Beispiel):
+--   Seiten: 60.240    CPU-Zeit: 250 ms    Dauer: 128 ms
+-- Nach Index-Optimierung:
+--   Seiten: 4         CPU-Zeit:   0 ms    Dauer:   0 ms
 
+-- Statistiken wieder deaktivieren
+SET STATISTICS IO, TIME OFF;
 
-select * from sys.dm_os_wait_stats
+-- ============================================================================
+-- 4. Index-Nutzungsstatistiken
+-- ============================================================================
+-- Zeigt, wie oft Indizes seit dem letzten Neustart genutzt wurden.
+-- Wichtige Spalten:
+-- user_seeks:    Anzahl SuchvorgÃ¤nge (gezielt, effizient â†’ wÃ¼nschenswert)
+-- user_scans:    Anzahl ScanvorgÃ¤nge (sequenziell â†’ kann verbessert werden)
+-- user_lookups:  Anzahl Key Lookups (zusÃ¤tzliche Seiten gelesen â†’ evtl. Index erweitern)
+-- user_updates:  Anzahl SchreibvorgÃ¤nge auf den Index (je hÃ¶her, desto teurer!)
+SELECT *
+FROM   sys.dm_db_index_usage_stats;
 
+-- ============================================================================
+-- 5. Wait-Statistiken fÃ¼r Zeitraumvergleiche (Delta-Analyse)
+-- ============================================================================
+-- Idee: Wartezeiten zu Zeitpunkt T1 und T2 speichern, dann Differenz berechnen
+-- Beispiel: LCK_M_S-Werte zu verschiedenen Zeitpunkten:
+--
+-- Zeit   | wait_time_ms | Differenz
+-- --------+--------------+----------
+-- 10:00  | 5.894.499    | â€“
+-- 10:10  | 5.894.499    | 0 (keine neuen Sperren)
+-- 10:20  | 8.745.766    | 2.851.267 (Sperren zugenommen!)
+--
+-- So lassen sich ProblemzeitrÃ¤ume eingrenzen.
 
+-- ============================================================================
+-- 6. Seit wann lÃ¤uft der SQL Server? (Neustart ermitteln)
+-- ============================================================================
+-- Die Erstellungszeit der tempdb entspricht dem letzten Neustart
+SELECT create_date AS ServerStartZeit
+FROM   sys.databases
+WHERE  name = 'tempdb';
 
---Query--Postkasten(Fifo)--> Worker(Analyse)-- Ressourcen!!
-
---                    supended  |runnable    |RUNNING
----(LCK_M_S)|........................|........................| 70ms bis das Ding läuft
---          0                 50ms CPU 20ms
-
---wait_time_ms: Gesamte Dauer: 70ms
---              Signal_time_ms: Anteil der CPU: 70-20=50
-
---leider sind die Werte kummilierend seit Neustart :-(
---wenn der Anteil der signaltime > 25% sein sollte, dann CPU Engpass
-
-select * from sys.dm_os_wait_stats order by 3 desc
-
---oder auch Daten des Perfmon abfragbar
-select * from sys.dm_os_performance_counters
-
-
-
-
-
-
-*/
+-- ============================================================================
+-- Wichtige DMV-Kategorien
+-- ============================================================================
+-- sys.dm_os_*   â†’ Betriebssystem- und SQL Server-Interna
+-- sys.dm_db_*   â†’ Datenbankbezogene Informationen
+-- sys.dm_exec_* â†’ Abfragen, Sessions, PlÃ¤ne
+-- sys.dm_io_*   â†’ I/O-Statistiken

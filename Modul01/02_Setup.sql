@@ -1,126 +1,117 @@
 /*
-Dienstkonten
-NT Service = Lokale sich selbstverwaltende Dienstkonten
---kein Kennwort notwendig
---lokales KOnto: Wie bewerkstellige ich den Netzwerkzugriff f�r Backups zB
+================================================================================
+  Modul 01 – SQL Server Setup: Konfigurationsdetails nach der Installation
+================================================================================
+  Dieses Skript dokumentiert die wesentlichen Einstellungen, die während oder
+  unmittelbar nach dem SQL Server Setup vorgenommen werden sollten.
 
-Alterniv:
-Dom�nenkonto.. ben�tigt keine besonderen Rechte
-diese werden lokal durch das Setup eingerichtet.
+  Themen:
+  - Dienstkonten: NT Service vs. Domänenkonten
+  - Dateiinitialisierung (Volumewartungsaufgabe)
+  - Verzeichnistrennung: Daten- und Protokolldateien
+  - MAXDOP-Empfehlung (eigenes Kapitel)
+  - TempDB-Konfiguration: Dateienanzahl und Traceflags
+  - Speicherlimits (MAX/MIN Server Memory)
+  - Virtuelle Maschinen: Ressourcenzuweisung anpassen
 
+  Wichtig: Wenn die VM nachträglich angepasst wird (RAM, CPUs), müssen
+  auch die SQL Server-Einstellungen entsprechend aktualisiert werden!
+================================================================================
+*/
 
-Volumewartungstask
-= reine Windows Sicherheitseinstellung
+-- ============================================================================
+-- Dienstkonten
+-- ============================================================================
+-- Option A: NT Service-Konten (lokale, selbstverwaltende Dienstkonten)
+--   - Kein Kennwort notwendig
+--   - Nur lokaler Zugriff – für Netzwerk-Backups ungeeignet
+--
+-- Option B: Domänenkonten (empfohlen für Produktionsumgebungen)
+--   - Benötigen vorab keine besonderen Rechte
+--   - Das Setup trägt die benötigten Rechte lokal ein
+--   - Ermöglichen Netzwerkzugriff (z. B. auf Netzwerk-Backup-Shares)
+--
+-- Beispielkonten: svcSQL (DB-Engine), svcAgent (SQL Agent)
 
-jede Vergr��erung verbraucht eigtl die doppelte Schreibarbeit
-da Windows zuerst die Dateien vergr��ert und mit 0 beschreibt
-eigtl ein Sicherheitsfeature: Lokaler Sicherheitsrichtlinien.. Zuweisen von Benutzerrechten
-----------------------
-0101010110101111111111
-----------------------
+-- ============================================================================
+-- Volumewartungsaufgabe (Instant File Initialization)
+-- ============================================================================
+-- Standard-Windows-Verhalten:
+--   Jede Dateierweiterung erfordert das doppelte Schreibvolumen,
+--   weil Windows die Datei zunächst mit Nullen füllt (Sicherheitsfeature).
+--
+-- Wenn die Volumewartungsaufgabe aktiviert ist:
+--   → SQL Server kann Datendateien sofort erweitern ohne Nullen-Initialisierung
+--   → Erheblich schnellere Dateioperationen
+--   → Konfiguriert über: Lokale Sicherheitsrichtlinien
+--                         → Zuweisen von Benutzerrechten
+--                         → "Durchführen von Volumewartungsaufgaben"
+--
+-- Hinweis: Gilt NUR für Datendateien (.mdf/.ndf), NICHT für Protokolldateien.
+-- Ein gutes I/O-Design macht dies weniger kritisch, aber es lohnt sich trotzdem.
 
-aktiviert man den Datenvol..wa..task... dann kann SQL Server eigenst�ndig vergr��eren
-ohne vorher ausnullen-- schneller,
+-- ============================================================================
+-- Verzeichnisse (Trennung von Daten und Protokoll)
+-- ============================================================================
+-- Bestes Vorgehen: Datendateien und Protokolldateien auf getrennten Laufwerken
+-- Backup-Pfad auf einem dritten, separaten Laufwerk
 
--->IO reduzieren! Aber einem guten Admin ist das wurst! ;-) Siehe DB Settings
+-- ============================================================================
+-- TempDB-Konfiguration
+-- ============================================================================
+-- TempDB wird genutzt für:
+--   - Temporäre Tabellen (#temp, ##global)
+--   - Zeilenversionierung (Snapshot-Isolation)
+--   - Index-Rebuilds
+--   - Auslagerungen beim Sortieren (wenn RAM knapp)
+--
+-- Empfehlungen:
+--   - Eigene Laufwerke für TempDB
+--   - Datendatei und Protokolldatei der TempDB trennen
+--   - Anzahl der Datendateien = Anzahl der CPU-Kerne (max. 8)
+--   - Traceflag 1117: Uniform Extents → kein gleichzeitiger Zugriff auf denselben Block
+--   - Traceflag 1118: Gleichmäßige Dateigröße → Mechanismus nicht aushebeln!
+--
+-- Hinweis: Ab SQL Server 2016 sind TF 1117 und 1118 für TempDB standardmäßig aktiv.
 
+-- ============================================================================
+-- Arbeitsspeicher-Konfiguration (MAX/MIN Server Memory)
+-- ============================================================================
+-- MAX Server Memory IMMER einstellen!
+--   Berechnung: Gesamt-RAM - OS-Bedarf - sonstige Dienste
+--   Beispiel: 16 GB - 4 GB (OS) = 12 GB MAX Server Memory
+--
+-- MIN Server Memory: Nur sinnvoll bei mehreren SQL-Instanzen (Konkurrenz um RAM)
+--   Der MIN-Wert wird erst belegt, wenn SQL Server entsprechend Daten geladen hat.
+--
+-- Sharepoint-Hinweis: SP drosselt Dienste bei >95 % RAM-Auslastung
+-- → SQL Server RAM-Limit schützt das Gesamtsystem
 
+-- ============================================================================
+-- Konfigurationsübersicht: HV-SQL1 (Produktivserver)
+-- ============================================================================
+-- Gesamt-RAM:    6 GB (fixer Speicher in Hyper-V)
+-- CPU-Kerne:     4 vCPUs
+-- Laufwerk:      C:\ (Beispiel – in Produktion trennen!)
+--
+-- MAXDOP:        4 (entspricht der Kernanzahl)
+-- MAX RAM:       3.800 MB (~3,8 GB, ca. 200 MB Reserve für OS)
+-- TempDB:        4 Datendateien (entspricht Kernanzahl)
+-- MDF + LDF:     physisch getrennte Laufwerke
+-- Backup:        separater Pfad/Laufwerk
+-- Authentifizierung: gemischte Auth (Windows + SQL)
 
+-- ============================================================================
+-- Konfigurationsübersicht: HV-SQL2 (zweiter Server)
+-- ============================================================================
+-- Gesamt-RAM:    4 GB (fixer Speicher in Hyper-V)
+-- CPU-Kerne:     4 vCPUs
 
-Frage nach Verzeichnissen  :
-Trenne Log von Daten physikalisch (HDDs) !!
-
-
-MAXDOP 
-= Anzahl der log Prozessoren (max 8)
--->eigenes Kapitel
-im Grunde: weiviele Kerne bekommt eine Abfrage maximal
-
-
-TempDB
-#tabellen, Zeilenversionierung
-IX Wartung, Auslagerungen beim Sortieren etwa
-
-Trenne Daten von Log und am besten eig HDDs
-
-Aber auch : 
-Anzahl der DAtendateien = Anzahl der Kerne  max 8 
-Traceflags 1117 + 1118
-
-
-Soviele Dateien wie Kerne, aber max 8
-Mehrere Tabellen k�nne im gleiche Block liegen, aber nur ein Thread darf zugreifen
-
--T1117 Uniform Extents... kein gleichzeitiger Zugriff mehr auf denselben Block, da jede Tabelle einen eig block belegt
--T1118 immer gleich gro�e Dateien.. greife nie in den Mechanismus ein, der wird sonst ausser Kraft gesetzt
-
-
---Arbeitspeicher. 
-Setup schl�gt f�r SQL einen max Speicher vor, um im worst Case nicht den gesamten RAM zu belegen
---DAS OS braucht auch Luft zum atmen... das Setup ber�cksichtigt die Umgebung (OS)
---Sharepoint: Wenn auf dem Server 95% Speicherauslastung, dann stellt SP Dienste
---Begrenze den SQL Server immer im Bereich MAX RAM... (OS)
-
-
---MAX Speicher 
-immer einstellen (Gesamt -OS - sonstige)
-
---MIN Speicher 
-nur bei Konkurrrenz (weiterer Instanz) sinnvoll
--- der mind RAM Wert wird erst belegt, wenn SQL Daten entsprechend abgelegt hat.
-
---AUFGABEN
-
---Findest du die Werte aus dem Setup im SQL Server wieder?
---MAXDOP = 4
---im Setup MAXDOP 8
-
---tempdb 4 dateien
---Das Setup h�tte 8 angelegt
-
---VM hat 2 CPUs und hat 4 GB RAM
-
---wenn man nachtr�glich die VM anpasst, dann sollten eben auch die Werte im SQL angepasst
---werden
-
-
-hv-sql1 -- Standardinstanz (1433)
-
-
-ca 6 GB
-4 Kerne
-C:\
-
-
-MAXDOP: 4
-RAM: MAX 3,8 GB
-Tempdb: Datendateien 4
-MDF und ldf.. getrennt
-Backup anderer Ort
-
-Auth
-
-
-
-
-
---HV-SQL2
-
-
-
-
-
-
-16 GB RAM
-4 Kerne
-
-
-16-4-2
-
-HV-DC     dyn. 1024-2048   2 Kerne
-HV-SQL1   fix  5000  4 kerne
-HV-SQL2   fix  4500  4 kerne
-
-
-
-
+-- ============================================================================
+-- RAM-Planung für Hyper-V-Host (Gesamtübersicht)
+-- ============================================================================
+-- Host gesamt:        16 GB
+-- Reserve Host-OS:     4 GB
+-- HV-DC:               dynamisch 1.024–2.048 MB, 2 vCPUs
+-- HV-SQL1:             fix 5.000 MB, 4 vCPUs
+-- HV-SQL2:             fix 4.500 MB, 4 vCPUs

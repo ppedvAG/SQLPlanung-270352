@@ -1,97 +1,99 @@
-Bestandsanalyse von jamesBond
-
---in DB whoami
-
-STDSchema DBO
-kein Schema in Besitz
-Mitglied Personalabteilung
-Sicherungf�hig
-
-
-Grunds�tzlich wurden Rechte per Rollen vergeben
-
-
---Wege um das Problem
-
 /*
-A)
-neues Login JamesBond mit Kennwort
---> andere SID
+================================================================================
+  Modul 06 – Verwaiste Datenbankbenutzer (Orphaned Users) beheben
+================================================================================
+  Ein verwaister Benutzer (Orphaned User) ist ein Datenbankbenutzer, dessen
+  zugehöriges Server-Login nicht mehr existiert oder eine andere SID besitzt.
+  Dies passiert typischerweise bei:
+  - Migration einer Datenbank auf einen neuen Server
+  - Löschen und Neuanlegen eines SQL Server-Logins (neue SID!)
+  - Wiederherstellung einer Datenbank auf einem anderen Server
 
-das Usermapping scheitert weil ein JB schon in der DB enthalten ist
+  Lösungsansätze:
+  A) Neues Login anlegen (neue SID) → User-Mapping schlägt fehl (Name existiert in DB)
+  B) Neues Login anlegen und SID des Datenbankbenutzers anpassen (sp_change_users_login)
+  C) Datenbankbenutzer löschen, neues Login anlegen, Benutzer neu erstellen (empfohlen)
 
+  Empfehlung für Option C (sauberste Lösung):
+  - Datenbankbenutzer löschen
+  - Neues Login anlegen (neues Kennwort vergeben!)
+  - Benutzer neu erstellen und Rollen neu zuweisen
 
-B)
-neues Login JB (mit neuer SID)  dann dem JB in der DB gleiche ID verpassen..
-?
-
-
-C)
-den JB in der DB l�schen, dann
-neues Login mit Usermapping und MItglied in Rolle Personal
-
-USE [whoamiDB]
-GO
-DROP USER [JamesBond]
-GO
-USE [master]
-GO
-CREATE LOGIN [JamesBond] WITH PASSWORD=N'123', 
-DEFAULT_DATABASE=[whoamiDB], 
-CHECK_EXPIRATION=OFF, CHECK_POLICY=OFF
-GO
-USE [whoamiDB]
-GO
-CREATE USER [JamesBond] FOR LOGIN [JamesBond]
-ALTER USER [JamesBond] WITH DEFAULT_SCHEMA=[dbo]
-ALTER ROLE [Personalabteilung] ADD MEMBER [JamesBond]
-GO
-
---auf jeden Fall neues Kennwort
-
-
-
-L�sung:
-
-sp_change_userslogin
-
-sp_help_revlogin --muss man bei MS besorgen
-da zu braucht man den Originalserver
-
-
-
-
+  Werkzeuge:
+  - sp_change_users_login  (veraltet, aber noch verwendbar)
+  - sp_help_revlogin       (von Microsoft verfügbar, muss importiert werden)
+  - dbatools (PowerShell)  → Export-DbaLogin / Sync-DbaLoginPermission
+================================================================================
 */
 
---DEPRICATED
-use whoamiDB
-sp_change_users_login 'Report' --verwaiste User
+-- ============================================================================
+-- Bestandsanalyse: Verwaiste Benutzer in der aktuellen Datenbank anzeigen
+-- ============================================================================
+USE whoamiDB;
+GO
 
---ein passendes Login anlegen
-sp_change_users_login 'Auto_fix' , 'jamesbond',NULL ,'ppedv2019!'
+-- Alle verwaisten Benutzer anzeigen (kein passendes Server-Login vorhanden)
+EXEC sp_change_users_login 'Report';
 
---Wenn ein gleichnamiges Login besteht aber andere SID besitzt
-----------------------                 User        Login
-sp_change_users_login 'Update_one', 'JamesBond', 'JamesBond'
+-- ============================================================================
+-- Option A: Automatische Reparatur (Auto_Fix)
+-- ============================================================================
+-- Sucht ein gleichnamiges Login und verknüpft es, oder legt ein neues an.
+-- Achtung: Das Kennwort wird als Parameter übergeben – nur für SQL-Logins!
+EXEC sp_change_users_login 'Auto_Fix', 'jamesbond', NULL, 'ppedv2019!';
 
+-- ============================================================================
+-- Option B: Benutzer mit einem anderen Login verknüpfen (SID-Update)
+-- ============================================================================
+-- Verknüpft den Datenbankbenutzer 'JamesBond' mit dem Server-Login 'JamesBond'
+-- (Aktualisiert die SID des Datenbankbenutzers auf die SID des Logins)
+EXEC sp_change_users_login 'Update_One', 'JamesBond', 'JamesBond';
 
+-- ============================================================================
+-- Option C: Sauberste Lösung – Benutzer löschen und neu anlegen
+-- ============================================================================
 
--------------------------------------------------------------------------------------
---DOWNLOAD von Microsoft Seite
+-- Schritt 1: Datenbankbenutzer löschen
+USE [whoamiDB];
+GO
+DROP USER [JamesBond];
+GO
 
+-- Schritt 2: Neues Login auf Serverebene anlegen (mit neuem Kennwort!)
+USE [master];
+GO
+CREATE LOGIN [JamesBond]
+    WITH PASSWORD         = 'NeuesSicheresKennwort!2024',
+         DEFAULT_DATABASE = [whoamiDB],
+         CHECK_EXPIRATION = OFF,
+         CHECK_POLICY     = OFF;
+GO
 
-sp_help_revlogin --im Ergebnisfenster tauchen SQL Scripte zum Anlegen der Logins auf inkl Kennwort und SID
-	--geht nur 
+-- Schritt 3: Datenbankbenutzer neu erstellen und Rollen zuweisen
+USE [whoamiDB];
+GO
+CREATE USER [JamesBond] FOR LOGIN [JamesBond];
+ALTER USER  [JamesBond] WITH DEFAULT_SCHEMA = [dbo];
+ALTER ROLE  [Personalabteilung] ADD MEMBER [JamesBond];
+GO
 
-automatisieren
-C:\Users\Administrator>sqlcmd -S. -E -dmaster -Q"sp_help_revlogin" > c:\logins.sql
+-- ============================================================================
+-- Logins mit SID auf anderen Server übertragen
+-- ============================================================================
+-- sp_help_revlogin gibt SQL-Skripte zum Neu-Erstellen der Logins aus
+-- (inkl. Original-SID und Kennwort-Hash → SID-Problem wird vermieden!)
+-- Muss von Microsoft heruntergeladen werden.
+-- EXEC sp_help_revlogin;
 
---dbatools.io  -- PS Script
+-- Automatisierung per SQLCMD:
+-- sqlcmd -S. -E -d master -Q "EXEC sp_help_revlogin" > C:\logins.sql
 
+-- Alternative mit PowerShell (dbatools):
+-- Export-DbaLogin -SqlInstance Server1 | Out-File C:\logins.sql
 
-
-
-
-
-
-select * from sysusers --0xA6EAD14673E2DA49A6D6C8A522A06681
+-- ============================================================================
+-- Verwaiste Benutzer anzeigen (aktuelle SIDs vergleichen)
+-- ============================================================================
+SELECT * FROM sysusers;
+-- Zeigt SIDs aller Datenbankbenutzer
+-- Vergleich mit sys.server_principals (Serverebene) zeigt Orphans
