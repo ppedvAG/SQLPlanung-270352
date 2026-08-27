@@ -60,7 +60,7 @@ GO
 USE ContainedDatabase;
 GO
 
-CREATE USER Theo WITH PASSWORD = 'Geheim4711!';
+CREATE USER Theo WITH PASSWORD = '<HierSicheresKennwortEintragen>';
 GO
 
 -- ============================================================================

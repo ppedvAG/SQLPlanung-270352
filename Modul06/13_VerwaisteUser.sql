@@ -63,7 +63,7 @@ GO
 USE [master];
 GO
 CREATE LOGIN [JamesBond]
-    WITH PASSWORD         = 'NeuesSicheresKennwort!2024',
+    WITH PASSWORD         = '<HierSicheresKennwortEintragen>',
          DEFAULT_DATABASE = [whoamiDB],
          CHECK_EXPIRATION = OFF,
          CHECK_POLICY     = OFF;

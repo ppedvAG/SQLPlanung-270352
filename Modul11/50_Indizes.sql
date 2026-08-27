@@ -37,7 +37,7 @@
   Gefilterter Index:
   - Nur ein Teilbereich der Datensätze wird indexiert (z. B. WHERE Land = 'USA')
   - Gut für Abfragen, die immer denselben Filter verwenden
-  - Vorsicht: Ein ungefiltererter Index kann trotzdem günstiger sein (B-Tree-Tiefe beachten)
+  - Vorsicht: Ein ungefilterter Index kann trotzdem günstiger sein (B-Tree-Tiefe beachten)
 
   Index mit eingeschlossenen Spalten (INCLUDE):
   - Schlüsselspalten = WHERE-Bedingung

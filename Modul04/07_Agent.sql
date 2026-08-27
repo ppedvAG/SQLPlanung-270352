@@ -70,7 +70,7 @@ ORDER BY severity DESC;
 -- → Meldung 102, Ebene 15, Status 1
 
 -- Fehler Ebene 16: Objekt nicht gefunden
-SELECT * FROM t2;
+-- SELECT * FROM t2;  -- Fehler Ebene 16 (zum Testen ausführen)
 -- → Meldung 208, Ebene 16, Status 1
 
 -- ============================================================================
