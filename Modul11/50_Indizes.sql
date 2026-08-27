@@ -1,321 +1,214 @@
 /*
-Thema: Indexarten, Wirkung und Wartung in SQL Server.
-Diese Datei gibt einen breiten Überblick über Clustered- und Nonclustered-Indizes.
-Für Anfänger wird erklärt, warum Indizes Leseabfragen stark beschleunigen können.
-Gleichzeitig verursachen sie Zusatzaufwand bei Datenänderungen.
-Das Skript behandelt auch zusammengesetzte und gefilterte Indizes.
-Zusätzlich werden Included Columns und abdeckende Indizes eingeordnet.
-Ein weiterer Schwerpunkt ist Columnstore für analytische Auswertungen.
-Die Beispiele zeigen, wie sich unterschiedliche Indexstrategien im Plan auswirken.
-Außerdem wird erläutert, wann Rebuild oder Reorganize sinnvoll ist.
-Ziel ist ein praxisnahes Verständnis für Auswahl, Nutzen und Pflege von Indizes.
+  Thema: Indizes â€“ Typen, Einsatz und Wartung in SQL Server.
+  Diese Datei erklÃ¤rt die verschiedenen Indexarten und ihre AnwendungsfÃ¤lle.
+  Ein Index ist eine sortierte Kopie von Daten, die gezielte Suchen beschleunigt.
+  Der Clustered Index bestimmt die physische Reihenfolge der Tabellendaten.
+  Non-Clustered Indizes sind separate Strukturen, die Lookups ermÃ¶glichen.
+  Weitere Typen wie Columnstore oder gefilterte Indizes sind fÃ¼r spezielle Szenarien.
+  Ein Schwerpunkt liegt auf abdeckenden Indizes, die Lookups vermeiden.
+  Ein weiterer Schwerpunkt ist Columnstore fÃ¼r analytische Auswertungen.
+  Die Beispiele zeigen, wie sich unterschiedliche Indexstrategien im Plan auswirken.
+  AuÃŸerdem wird erlÃ¤utert, wann Rebuild oder Reorganize sinnvoll ist.
+  Ziel ist ein praxisnahes VerstÃ¤ndnis fÃ¼r Auswahl, Nutzen und Pflege von Indizes.
 */
 
 /*
+  INDEX-TYPEN IM ÃœBERBLICK
 
-INDIZES
+  Clustered Index (CL IX):
+  - Die Tabelle selbst IS der Clustered Index â†’ Daten in sortierter Form
+  - Nur 1 Clustered Index pro Tabelle mÃ¶glich
+  - Gut bei Bereichsabfragen (BETWEEN, >, <), da Daten physisch sortiert sind
+  - Niemals Lookups in einem Clustered Index â†’ alle Spalten direkt verfÃ¼gbar
+  - SSMS setzt standardmÃ¤ÃŸig beim Primary Key einen Clustered Index
+    â†’ Oft unvorteilhaft! Besser: Clustered Index auf die am hÃ¤ufigsten gelesene Range-Spalte
 
-CLUST IX
-=Tabelle in sortierter Form
-nur 1x pro Tabelle
-gut bei Bereichsabfragen, weil sortiert
-gut bei eindeutigen Werten 
-per SSMS wird immer beim PK ein CL IX gesetzt.. in vielen Fälle dumm
+  Non-Clustered Index (NCL IX):
+  - Kopie ausgewÃ¤hlter Spalten in sortierter Form (separates B-Tree)
+  - Bis zu ca. 999 NCL-Indizes pro Tabelle mÃ¶glich (Limit: 1000 gesamt)
+  - Gut fÃ¼r geringes Resultat-Set (WHERE id = 100)
+  - Key Lookup: Falls benÃ¶tigte Spalten nicht im Index â†’ extra Seitenzugriff!
 
+  Zusammengesetzter Index:
+  - Max. 16 Spalten, max. 900 Byte SchlÃ¼ssellÃ¤nge
+  - Meist nicht mehr als 4 Spalten sinnvoll
+  - Spaltenreihenfolge entscheidend! Gleichheitsspalten zuerst, dann Bereichsspalten
 
-NON CLUST IX
-= Kopie von Daten in sortierter Form
-ca 1000 mal Tabelle
-gut bei geringen Resultset (id)
+  Gefilterter Index:
+  - Nur ein Teilbereich der DatensÃ¤tze wird indexiert (z. B. WHERE Land = 'USA')
+  - Gut fÃ¼r Abfragen, die immer denselben Filter verwenden
+  - Vorsicht: Ein ungefilterter Index kann trotzdem gÃ¼nstiger sein (B-Tree-Tiefe beachten)
 
---------------------------
-eindeutiger IX
+  Index mit eingeschlossenen Spalten (INCLUDE):
+  - SchlÃ¼sselspalten = WHERE-Bedingung
+  - Eingeschlossene Spalten = SELECT-Spalten (belastet den B-Tree nicht!)
+  - Max. 1.023 eingeschlossene Spalten
+  - Ideal fÃ¼r "abdeckende Indizes" â†’ kein Lookup notwendig!
 
-zusammengesetzter IX
-max 16 Spalten/32 und max 900bytes Schlüssellänge
-meist nicht mehr als 4 notwendig
+  Abdeckender Index (Covering Index):
+  - EnthÃ¤lt alle benÃ¶tigten Spalten â†’ reiner Index Seek ohne Lookup
+  - Idealfall: Keine zusÃ¤tzlichen Seiten gelesen auÃŸer dem Index selbst
 
-gefilterter IX
-nicht alle Datensätze
-Vorsicht: evtl ist ungefiltert genauso gut (Anzahl der Ebenen entscheidend)
+  Partitionierter Index:
+  - Entspricht einem gefilterten Index auf physischer Ebene
+  - Alle Werte werden auf bestimmte Bereiche (Partitionen) aufgeteilt
+  - Im Gegensatz zum gefilterten Index werden ALLE DatensÃ¤tze einbezogen
 
-IX mit eingeschlossenen Spalten
-1023 Spalten
-belastet den Baum nicht
+  Columnstore Index:
+  - Daten spaltenweise gespeichert (statt zeilenweise)
+  - Stark komprimiert â†’ passt viel mehr in den RAM als Rowstore
+  - Optimal fÃ¼r analytische Abfragen (GROUP BY, SUM, AVG Ã¼ber viele Zeilen)
+  - Neue Zeilen landen zunÃ¤chst im Delta Store (Heap), erst ab ~1 Mio. Zeilen
+    werden sie in komprimierte Segmente Ã¼berfÃ¼hrt
+  - Bei Massenimporten (ab ca. 100.000 Zeilen) direkter Eintrag in Columnstore
 
-partitionierter IX
-entspricht gefilteren IX auf phsysikalischer Ebene
-im Gegensatz zum gefilterten , wird der part IX jedoch alle Spaltenwerte in best Bereiche einordnen
-
-Der Gefilterte dagegen betrachten nur die Datensätze, die sich durch den Filter ergeben
-(zb USA)
-
-----DE------FR-------IT-----UK-------------------------
-Tabelle selbst kann/muss aber nicht / auf einer Partitionierung liegen
-IX kann getrennt davon auf eine Partition gelegt werden..und muss nach der gleichen Spalte partitioniert werden
-
-
-
-abdeckender IX
-= idealer IX..reinen SEEK, kein Lookup , kein Scan
-
-
-realer hypothetischer IX-- diese erstellt der Database Tuning Advisor ... unsichtbar im Hintergrun und löscht sie nach getaner Arbeit wieder
-das Tool: Datenbankoptimierungsratgeber erstellt diese, um effiziente IX zu finden
-diese sind "unsichtbar" und werden für Bneutzerabfragen nicht eingesetzt.
-Also real und dennoch hyptothetisch...
-Den Datenbankoptimierungsratgeber unbedingt seine Analyse zu Ende bringen lassen.
-Sonst belieben die unsichtbaren IX Vorschläge in der DB hängen. ..
-Stört, dann, wenn man keine neue mehr anlegen kann, weil zu viele IX existieren (Limit 1000)
-
-
-ind Sicht
-generiert auf das Ergebnis der Sicht einen gruppierten IX
-unterliegt jedich sehr vielen Randbedingungen
-(	Eindeutigkeit,deterministisch, 
-	With schemabinding,Basistabelle und Sicht derselbe Besitzer, 
-	bei group by muss count_big(*), kein AVG, sondern errechnen lassen ..usw..)
-
--------------------------------
-Columnstore (Gruppiert und nicht gruppiert)
-stark komprimiertes spaltenweises Ablegen der Daten
-CPU optimiert
-kommt, wie "normale" Seiten 1:1 in RAM
-Aber: neue Datensätze kommen in einen zeileorientierte Heap (deltastore)
-erst ab einer Million werden die Daten des Heap in die kompr Segmente übergeführt
-Ausnahme: bei Massenimporten (ab ca 100000) werden die DS direkt in den Columntore übergeführt
-
-
-
-
-
-
---Vorsicht: Index Scan ist nicht schlecht-- weniger Aufwand als Table Scan, aber SEEK wäre besser
-
---Optimierer entscheidet sich für einen Scan , wenn dieser weniger Kosten als ein Seek verursacht
---der Optimierer entscheidet sich für einen IX Scan, wenn dieser günstiger als ein Table Scan ist.
-
--- user_scan, index_scan  ..nie gebrauchte Indizes evtl löschen
--- user_scan, index_scan  .. besser als table scan
-
---Kann man unnütze IX finden: DMVs...!
-sys.dm_db_index_usage_Stats
-
-toDO mit Indizes: Defragmentieren , überflüssige entfernen und fehlende erstellen
---Wartungsplan
-
--- Brent Ozar SP_blitzIndex-- First Responder Kit 0 Euro
-
---Wartung--> Wartungsplan: IX Rebuild IX Reorg Statistiken
-
---Stat:  akt nach 20% Änderung plus 500  zu spät, weil ab  ca 1% -- jeden Tag aktualisieren
-
---IX Reorg ab 10% 
---Rebuild ab 30%
-
-exec sp_updatestats
-
-
-TIPP:
-
-IX mit eingeschlossenen Spalten
-Die Schlüsselspalten blden sich aus den Spalten der where Bedingung
-Die eingeschlossenen Spalten entnimmt man aus dem SELECT 
-
-
-CLUSTERED INDEX.. als Primäschlüssel oft pure Verschwendung
-CL spielt seine Vorteile bei Berecihsabfragen aus und wird nie Lookup Vorgänge erzeugen... 
-allerdings gibt es diesen nur 1 mal pro Tabellen... Also gut vorher überlegen
---über die Entwurfsansicht der Tabelle--> rechte Maus--> Indizes und Schlüssel-- als Clustered erstellen (Ja / Nein) läßt sich das ändern.
-
-
-
-
+  Indizierte Sicht (Indexed View):
+  - Erstellt auf das Ergebnis einer View einen gruppierten Index
+  - Daten der View werden physisch gespeichert â†’ sehr schnell fÃ¼r Aggregationen
+  - Viele EinschrÃ¤nkungen: WITH SCHEMABINDING, COUNT_BIG(*), kein AVG,
+    deterministische AusdrÃ¼cke, gleicher Besitzer von View und Basistabelle
 */
 
-select * into ku2 from ku1
-
-dbcc showcontig('ku2') -- 40455
-
-alter table ku2 add id int identity
-
-dbcc showcontig('ku2') -- 41092
-
-set statistics io, time on
-select * from ku2 where id =  100 --  57210,  vs  41092
-
-select * from sys.dm_db_index_physical_stats(db_id(), object_id('ku2'),NULL,NULL, 'detailed')
-
---forward record counts muss NULL sein
---wenn man einen HEAP kann das passieren (neue Spalten)
---ID sind im "Anhang gelandet" und verbrauchen deutlich mehr Platz als notwendig
---CL IX = Lösung
-
-
-alter table ku1 add id int identity
-
-
---CL IX auf Orderdate ist fix
-
---Welcher Plan? -- T SCAN
-select id from ku1 where id = 100  --57206
---Tab Scan
-
---besser durch: NIX_ID  --IX SEEK
-select id from ku1 where id = 100  --3
---Plan   IX Seek + Lookup       Seiten: 4
-
-select id, freight from ku1 where id = 100
---Nun kommt ein Lookup dazu... = teuer. Je mehr Lookups desto teuerer
---Lookup unbedingt vermeiden!!!!
-select id, freight from ku1 where id < 10500 --ab 11500 ca Table scan
-
-
---besser mit: NIX_ID_FR (zusammengesetzter IX)
-select id, freight from ku1 where id < 900500 --ab 10500 ca Table scan
-
---Achtung: nun haben wir mehrer Indizes , die gleiches leisten
--- das bedeutet nicht nur überflüssig, sondern extra Kosten bei INS UP DEL
--- I U D ist erst dann "zu Ende" , wenn alle betroffenen IX aktualisiert wurden
-
-
-select * from ku1
-where country = 'USA' and freight < 1
---NIX_CYFR
-
-
-select country, city,Sum(UnitPrice*quantity)
-from ku1
-where employeeid = 2
-group by country, city
---NIX_EID_inkl_cy_ci_up_qu
-
---where  = Schlüsselspalte
---select = eingeschlossene Spalten
-
-
-
---NIX_EMPID_SCY_incl_CnameLname_Pname
-select companyname, lastname, productname
-from ku1
-where EmployeeID= 2 and Shipcountry = 'USA'
-
---kein Vorschlag mehr, aber es sollten 2 sein
-select companyname, lastname, productname
-from ku1
-where EmployeeID= 2 or Shipcountry = 'USA'
-
-
---Ind. Sicht
-
-select country, count(*) from ku1
-group by country
-
-
-create view vdemo
-as
-select country, count(*) as ANz from ku1
-group by country
-
-select * from vdemo
-
-select country, count(*) from ku1
-group by country
-
-create or alter view vdemo  with schemabinding
-as
-select country, count_big(*) as ANz from dbo.ku1
-group by country
-
-
---COLUMNSTORE
-select * into ku3 from ku
-
-
-select Companyname, avg(quantity), min(quantity)
-from ku1
-where
-		country = 'germany'
-group by CompanyName
-
-
-select Companyname, avg(quantity), min(quantity)
-from ku3
-where
-		country = 'germany'
-group by CompanyName
-
-
---Warum schneidet die KU3 bei jeder Abfrage , gleich oder besser ab
-
---Größe der KU und Größe der KU3
--- 600MB vs 4 MB
---Stimmt das oder nicht?
-
---es stimmt!!!!
---und das genauso im RAM
-
-
-
-select Companyname, avg(quantity), min(quantity)
-from ku3
-where
-		city = 'Berlin'
-group by CompanyName
-
-
---INDIZES müssen gewartet werden
-
-
-
---Wartung der Indizes
---rebuild reorg
-
---rebuild ab Fragmentierung 30%
---reorg darunter
---unter 10 % nix
-
---Fehlende IX finden
---überflüssige IX entfernen
-
-select * from sys.dm_db_index_usage_stats
-
---1 = CL IX
---0 = Heap
---> 1   NCL IX
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+USE northwind;
+GO
+
+-- ============================================================================
+-- Demo: Tabellen-Setup
+-- ============================================================================
+
+-- Kopie der KU-Tabelle als HEAP (kein Clustered Index)
+SELECT * INTO ku2 FROM ku1;
+
+-- Fragmentierungsanalyse: Veraltet (deprecated)
+DBCC SHOWCONTIG('ku2');  -- Beispiel: 40.455 Seiten
+
+-- Neue Spalte hinzufÃ¼gen â†’ erzeugt Forwarded Records im Heap
+ALTER TABLE ku2 ADD id INT IDENTITY;
+
+-- Nach ALTER TABLE: mehr Seiten durch Forwarded Records
+DBCC SHOWCONTIG('ku2');  -- Beispiel: 41.092 Seiten
+
+-- I/O-Statistiken aktivieren
+SET STATISTICS IO, TIME ON;
+
+-- Abfrage mit WHERE auf ID â†’ erzwingt Table Scan (kein Index vorhanden)
+-- Ergebnis: ~57.210 Seiten gelesen!
+SELECT *
+FROM   ku2
+WHERE  id = 100;
+
+-- Moderne Fragmentierungsanalyse (empfohlen)
+-- forwarded_record_count sollte immer NULL oder 0 sein!
+SELECT *
+FROM sys.dm_db_index_physical_stats(DB_ID(), OBJECT_ID('ku2'), NULL, NULL, 'detailed');
+
+-- ============================================================================
+-- Demo: Index-Typen und ihre Wirkung
+-- ============================================================================
+
+-- Table Scan: Alle 57.206 Seiten gelesen (kein Index auf ID)
+SELECT id FROM ku1 WHERE id = 100;
+
+-- Nach dem Anlegen von NIX_ID (Non-Clustered Index auf ID):
+-- Index Seek + Key Lookup â†’ nur 4 Seiten gelesen!
+-- CREATE INDEX NIX_ID ON ku1(id);
+SELECT id FROM ku1 WHERE id = 100;
+
+-- Key Lookup entsteht, wenn der Index ID hat, aber auch FREIGHT benÃ¶tigt wird
+-- Je mehr Lookups, desto teurer!
+SELECT id, Freight FROM ku1 WHERE id = 100;
+
+-- Abdeckender Index (zusammengesetzt) vermeidet den Lookup
+-- CREATE INDEX NIX_ID_FR ON ku1(id, freight);
+SELECT id, Freight FROM ku1 WHERE id < 900500;
+
+-- ============================================================================
+-- Demo: Abdeckende Indizes mit eingeschlossenen Spalten
+-- ============================================================================
+
+-- Filterbedingung: Country und Freight
+-- SchlÃ¼sselspalten: Country, Freight
+-- CREATE INDEX NIX_CYFR ON ku1(Country, Freight);
+SELECT *
+FROM   ku1
+WHERE  Country = 'USA' AND Freight < 1;
+
+-- Komplexere Abfrage: Gruppierung nach Land und Stadt pro Mitarbeiter
+-- SchlÃ¼sselspalten: EmployeeID (WHERE)
+-- Eingeschlossene Spalten: Country, City, UnitPrice, Quantity (SELECT + GROUP BY)
+-- CREATE INDEX NIX_EID_inkl_cy_ci_up_qu ON ku1(EmployeeID) INCLUDE (Country, City, UnitPrice, Quantity);
+SELECT   Country, City, SUM(UnitPrice * Quantity) AS Umsatz
+FROM     ku1
+WHERE    EmployeeID = 2
+GROUP BY Country, City;
+
+-- ============================================================================
+-- Demo: Columnstore Index fÃ¼r analytische Abfragen
+-- ============================================================================
+
+-- Kopie der KU-Tabelle als Zeilenspeicher
+SELECT * INTO ku3 FROM ku;
+
+-- Columnstore Index auf ku3 anlegen:
+-- CREATE COLUMNSTORE INDEX IX_CS ON ku3 (CompanyName, Quantity, Country, City);
+
+-- Vergleich: Zeilenspeicher vs. Columnstore
+-- Zeilenspeicher (ku1): ~600 MB
+SELECT CompanyName, AVG(Quantity), MIN(Quantity)
+FROM   ku1
+WHERE  Country = 'Germany'
+GROUP BY CompanyName;
+
+-- Columnstore (ku3): ~4 MB â†’ extrem komprimiert, optimal fÃ¼r Analysen
+SELECT CompanyName, AVG(Quantity), MIN(Quantity)
+FROM   ku3
+WHERE  Country = 'Germany'
+GROUP BY CompanyName;
+
+-- ============================================================================
+-- Demo: Indizierte Sicht (Indexed View)
+-- ============================================================================
+
+-- Einfache View ohne Index
+CREATE VIEW vDemo AS
+    SELECT Country, COUNT(*) AS Anzahl
+    FROM   ku1
+    GROUP BY Country;
+GO
+
+-- View mit Schema-Binding und Clustered Index (Indizierte Sicht)
+CREATE OR ALTER VIEW vDemoIndexed WITH SCHEMABINDING AS
+    SELECT Country, COUNT_BIG(*) AS Anzahl   -- COUNT_BIG(*) ist Pflicht!
+    FROM   dbo.ku1                            -- Schema-Qualifizierung ist Pflicht!
+    GROUP BY Country;
+GO
+
+-- Clustered Index auf die View erstellen â†’ Daten werden physisch gespeichert
+-- CREATE UNIQUE CLUSTERED INDEX IX_vDemoIndexed ON dbo.vDemoIndexed (Country);
+
+-- ============================================================================
+-- Index-Wartung
+-- ============================================================================
+-- Fragmented < 10 %:  Keine MaÃŸnahme notwendig
+-- Fragmented 10-30 %: REORGANIZE (online, weniger Ressourcen)
+-- Fragmented > 30 %:  REBUILD    (offline oder online, vollstÃ¤ndige Neustruktur)
+
+-- Statistiken manuell aktualisieren (alle in der DB)
+EXEC sp_updatestats;
+
+-- Fragmentierung prÃ¼fen (Ausgabe: avg_fragmentation_in_percent)
+SELECT *
+FROM   sys.dm_db_index_physical_stats(DB_ID(), NULL, NULL, NULL, 'LIMITED');
+
+-- Index-Nutzung abfragen (fÃ¼r Ã¼berflÃ¼ssige Indizes)
+-- user_updates >> user_seeks â†’ Index kostet mehr als er bringt â†’ Kandidat zum LÃ¶schen
+SELECT *
+FROM   sys.dm_db_index_usage_stats
+WHERE  database_id = DB_ID();
+
+-- ============================================================================
+-- Tipp: Abdeckenden Index entwerfen
+-- ============================================================================
+-- SchlÃ¼sselspalten:       Spalten in der WHERE-Bedingung
+-- Eingeschlossene Spalten: Spalten im SELECT (nicht fÃ¼r Filterung benÃ¶tigt)
+-- Clustered Index:        Nur 1x mÃ¶glich â†’ auf Bereichsspalte (nicht PK!)

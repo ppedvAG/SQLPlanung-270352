@@ -1,44 +1,75 @@
 /*
-Thema: Forwarded Records und ihre Performance-Folgen.
-Diese Datei erkl�rt, warum HEAP-Tabellen nach �nderungen fragmentieren k�nnen.
-Wenn Zeilen wachsen, werden sie teils verschoben und nur noch weitergeleitet.
-F�r Anf�nger wichtig: Solche Weiterleitungen erh�hen Seitenzugriffe deutlich.
-Dadurch werden Scans teurer und Abfragen insgesamt langsamer.
-Das Skript zeigt Messungen mit DBCC und DMV-Auswertungen.
-So wird sichtbar, warum gelesene Seiten oft h�her sind als erwartet.
-Ein zentraler L�sungsansatz ist ein passender Clustered Index.
-Damit werden Forwarded Records vermieden oder reduziert.
-Ziel ist, Speicherlayout und Laufzeitverhalten besser zu verstehen.
+  Thema: Forwarded Records und ihre Performance-Folgen.
+  Diese Datei erklärt, warum HEAP-Tabellen nach Änderungen fragmentieren können.
+  Wenn Zeilen wachsen, werden sie teils verschoben und nur noch weitergeleitet.
+  Für Anfänger wichtig: Solche Weiterleitungen erhöhen Seitenzugriffe deutlich.
+  Dadurch werden Scans teurer und Abfragen insgesamt langsamer.
+  Das Skript zeigt Messungen mit DBCC und DMV-Auswertungen.
+  So wird sichtbar, warum gelesene Seiten oft höher sind als erwartet.
+  Ein zentraler Lösungsansatz ist ein passender Clustered Index.
+  Damit werden Forwarded Records vermieden oder reduziert.
+  Ziel ist, Speicherlayout und Laufzeitverhalten besser zu verstehen.
 */
 
---Design Ph�nomene
+-- ============================================================================
+-- Was sind Forwarded Records?
+-- ============================================================================
+-- Ursache: ALTER TABLE ADD COLUMN bei HEAP-Tabellen (ohne Clustered Index)
+-- Ablauf:
+--   1. Neue Spalte wird hinzugefügt
+--   2. Zeilen, die nicht mehr auf die ursprüngliche Seite passen, werden verschoben
+--   3. An der ursprünglichen Stelle verbleibt ein "Forwarding Pointer"
+--      (Zeiger auf die neue Position)
+--   4. Jede Abfrage muss nun:
+--      a) Die ursprüngliche Seite lesen (Zeiger)
+--      b) Die neue Seite lesen (eigentliche Daten)
+--      → Doppelter I/O-Aufwand pro verschobener Zeile!
 
---forward Record Counts
---kommt durch Hinzuf�gen von Spalten zu bestehenden Tabellen
---14000 Seiten mehr als Tabelle hat???
+-- ============================================================================
+-- Phänomen messen: DBCC SHOWCONTIG (veraltet, aber anschaulich)
+-- ============================================================================
+-- Beispiel: 42.186 Seiten in der Tabelle KU
+DBCC SHOWCONTIG('ku');  -- Veraltet (deprecated), aber noch nutzbar
 
---Alter  !!
+-- ============================================================================
+-- Moderner Ansatz: sys.dm_db_index_physical_stats
+-- ============================================================================
+-- forwarded_record_count > 0 → Problem vorhanden!
+-- forwarded_record_count = NULL → Clustered Index vorhanden (kein Forwarding möglich)
+SELECT *
+FROM sys.dm_db_index_physical_stats
+    (
+        DB_ID(),             -- Aktuelle Datenbank
+        OBJECT_ID('ku'),     -- Tabelle 'ku'
+        NULL,                -- Alle Indizes
+        NULL,                -- Alle Partitionen
+        'DETAILED'           -- Detaillierter Modus (zeigt forwarded_record_count)
+    );
 
---Table Scan 56000
+-- Interpretation:
+-- forwarded_record_count = NULL → Clustered Index, kein Problem
+-- forwarded_record_count = 0    → HEAP, aber keine verschobenen Zeilen
+-- forwarded_record_count > 0    → Problem! Viele Weiterleitungen → Performance leidet
 
-dbcc showcontig('ku')--42186
+-- ============================================================================
+-- Lösung: Clustered Index erstellen
+-- ============================================================================
+-- Ein Clustered Index reorganisiert die Daten physisch → keine Forwarded Records mehr
 
+-- Clustered Index anlegen (auf geeignete Spalte, z. B. Bestelldatum)
+-- CREATE CLUSTERED INDEX IX_KU_OrderDate ON ku (OrderDate);
 
---der dbcc ist veraltet.. hier hilft der Befehl 
+-- Nach der Erstellung: forwarded_record_count = NULL (kein HEAP mehr)
 
-select * from sys.dm_db_index_physical_stats
-		(db_id(), object_id('ku'),null,null,'detailed')
+-- Falls der Clustered Index nicht dauerhaft gewünscht ist:
+-- Clustered Index anlegen → Forwarded Records werden automatisch aufgelöst
+-- Clustered Index wieder löschen → Tabelle ist wieder ein HEAP, aber sauber
 
---forwarded_record_count immer NUll oder 0 sein
+-- ============================================================================
+-- Hinweis zu DDL vs. DML
+-- ============================================================================
+-- DDL (Data Definition Language):  CREATE, ALTER, DROP → Strukturänderungen
+-- DML (Data Manipulation Language): INSERT, UPDATE, DELETE → Datenänderungen
 
--- der forwardRecordCount sollte immer NULL oder 0 sein
-
--- im Falle von Clustered Indizes wird es immer NULL sein
-
---sond forwardrecordcounts vorhanden--> CL IX erstellen
---und falls der nicht erw�nscht ist wieder l�schen
-:-)
-
---TRIGGER: INS UP DEL   DML
-
---DDL: CR ALTER DROP
+-- Forwarded Records entstehen durch DDL auf HEAP-Tabellen (ALTER TABLE ADD COLUMN)
+-- → Bevorzuge es, das finale Tabellenschema von Anfang an festzulegen!

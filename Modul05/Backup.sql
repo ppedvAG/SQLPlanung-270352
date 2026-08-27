@@ -1,187 +1,146 @@
 /*
+================================================================================
+  Modul 05 – Sicherung und Wiederherstellung (Backup & Restore)
+================================================================================
+  Dieses Skript beschreibt die Sicherungsstrategie für SQL Server-Datenbanken,
+  die verschiedenen Wiederherstellungsmodelle und typische Restore-Szenarien.
 
-Wiederherstellungsmodel oder RecoveyModel
+  Wiederherstellungsmodelle (Recovery Models):
+  1. Einfach (Simple):
+     - Transaktionen werden protokolliert, aber nach COMMIT aus dem T-Log entfernt
+     - T-Log kann NICHT gesichert werden → kein Point-in-Time-Restore möglich
+     - Geeignet für: Testumgebungen, nicht kritische Datenbanken
 
-1. Einfach (Simple)
-	..werden TX werden protokolliert, aber nach COMMIT oder ROllACB aus dem Tlog entfernt
-	- kann nicht gesichert
-	-- Testumgebung
-2. Massenprotokolliert (Bulk)
-	-- merkt sich die TX und es wirds nichts gelöscht
-	-- man muss das Tlog sichern, um Platz zu schaffen, weil nur die TLOG Sicherung das TLOG leert
-	-- man kann auf Sekunden restoren, aber nur wenn kein BULK BEfehl vorkam
-3. Vollständige (Full)
-	-- es wird alles exakt protkolliert
-	-- man kann auf Sek restoren
-	-- Produktion
+  2. Massenprotokolliert (Bulk-Logged):
+     - T-Log wird aufgezeichnet und gesichert
+     - Massenoperationen (BULK INSERT, SELECT INTO) werden minimal protokolliert
+     - Point-in-Time-Restore eingeschränkt, wenn BULK-Befehle vorkamen
+     - Geeignet für: Massenimporte, ETL-Prozesse
 
+  3. Vollständig (Full):
+     - Alles wird exakt protokolliert → Point-in-Time-Restore bis auf Sekunden möglich
+     - T-Log muss regelmäßig gesichert werden, sonst wächst er unbegrenzt!
+     - Geeignet für: Alle Produktionsdatenbanken
 
+  Sicherungsarten:
+  - Vollsicherung (V):         Alle Datenbankdateien + Zeitpunkt
+  - Differenzsicherung (D):    Alle Änderungen seit der letzten Vollsicherung
+  - T-Log-Sicherung (T):       Alle Transaktionen seit der letzten T-Log-Sicherung
+                               Leert das T-Log und ermöglicht genauen Restore-Zeitpunkt
 
-Sicherungsarten  
-Vollständig V
-	-- sichert alle Dateien der DB (Pfade und Größe)
-	-- Zeitpunkt
+  Empfohlenes Sicherungsschema: V TTT D TTT D TTT
+  (Vollsicherung, dann mehrere T-Log-Sicherungen, dann Differenzsicherung usw.)
 
-Differenz D
-	merkt isch alle Blöcke, die sich seit dem letzten V verändert haben
-	
-Tlog T
-	- Tlog merkt sich die Anweisung (I U D)
-
-
-! V  (6:00)
-	T
-	T
-	T
-		
-	T
-	T
-	T
-!		
-!	T
-!	T
-!	T (14:30)
-
-
-Restore des V ist der schnelleste Restore
-Das T kann solange brauchen wie das Sicherungsinterval des T ist
-Das D sichert und verkürzt des Restore (ungemein)
-
-Planen: 
-Zu erst das V.. So fot wie möglich
-
-Dann das T: wie lange darf die DB still stehen?
-			wieviel Datenverlust  in Zeit darf ich erleiden?
-
-Teste!!!!
-
-
-Welche Fälle gibt es eigtl , um einen Restore machen zu müssen:
-
-1. Server tot--> Restore auf anderen Server
-	1.a aber die Datenträger sind 100 ok
-	1.b nur die Datendatei ist ok, Log ist tot
-	1.c alle Dateien hinüber
-2. DB beschädigt --> Restore auf selben Server (ersetzen , weil reparieren versagt)
-3. User hat versehentlich etwas versemmelt - DB ok
-	3.a er weiss , was betroffen ist
-	3.b er weiss nicht, welche DS betroffen
-4. Wenn ich wüßte, dass gleich was passiert
-
-
-
+  Restore-Strategie richtet sich nach dem Recovery Time Objective (RTO)
+  und Recovery Point Objective (RPO) der Anwendung.
+================================================================================
 */
---VOLLSICHERUNG
-BACKUP DATABASE [Northwind] TO  DISK = N'C:\_SQLBACKUP\northwind.bak' 
-	WITH NOFORMAT, NOINIT,  NAME = N'Northwind-Vollständig Datenbank Sichern', 
-	SKIP, NOREWIND, NOUNLOAD,  STATS = 10
-GO
---DIFFSICHERUNG
-BACKUP DATABASE [Northwind] TO  DISK = N'C:\_SQLBACKUP\northwind.bak' 
-	WITH  DIFFERENTIAL , NOFORMAT, NOINIT,  NAME = N'Northwind-Differenziell',
-		SKIP, NOREWIND, NOUNLOAD,  STATS = 10
-GO
---LOGSICHERUNG
-BACKUP LOG [Northwind] TO  DISK = N'C:\_SQLBACKUP\northwind.bak' 
-	WITH NOFORMAT, NOINIT,  NAME = N'Northwind-Tlog', 
-		SKIP, NOREWIND, NOUNLOAD,  STATS = 10
-GO
 
+-- ============================================================================
+-- Sicherungs-Skripte
+-- ============================================================================
 
-Wir sichern : V TTT D TTT 
-
---RESTORE
-
-1. Server tot--> Restore auf anderen Server
-	1.a aber die Datenträger sind 100 ok
-		Dateien anfügen
-
-	1.b nur die Datendatei ist ok, Log ist tot
-	  Logdatei entfernen , dann anfügen
-	
-	1.c alle Dateien hinüber
-	--Tipp::
-	--kopiere das Backup immer dorthin , wo der Server es auch erwartet
-	-- Medium wählen und dann evtl Pfade anpassen
-
-3. User hat versehentlich etwas versemmelt - DB ok
-	3.a er weiss , was betroffen ist
-
-	.unter anderern Namen restoren (auf Pfade und DAteinamen aufpassen- müssen geändert werden)
-	!! Protkollfragmentsicherung deaktiveren
-	--> restoren mit Update / insert / Delete weiterarbeiten
-
-	3.b er weiss nicht, welche DS betroffen
-		-- Restore der DB 
-	3.b ist auch Fall 2 
-	--> DB restoren mit geringstmöglichen DAtenverlust
-
-
-
-V: 6 Uhr
-D: 10:00
-T: 10:10
-T: 10:20
-T: 10:30
-Error : 10:34
-
---Theoretisch 10:30 mit best Sicherungen Datenverlust = 3-4 min
-
---Faul: Warten auf 10:40 T 
--- damit restore von 10:33 --> Datenverlust = 6-7 min
-
---besser:
--- manuell Sicherung von 10:35  Restore von 10:33
---Verlust Dauer der tLogSicherung von 10:35 = zB 90 Sek, Backup wird online gmacht
-
--- noch besser:
--- manuell Sicherung von 10:35  Restore von 10:33 mit der Zeitachse
--- aber wir wefen die User runter  
-
---Protokollfragmentsicherung regelt.
--- Beim  Restore angeben:
-	--User von der DB trennen
-	--DB with replace
-
-
-
-	--4. Wenn ich wüsste:--> DB Momentaufnahme
-
-
-
-	-- =============================================
--- Create Database Snapshot Template
--- =============================================
-USE master
+-- Vollsicherung (Full Backup)
+-- Enthält: alle Datenbankdateien, Zeitpunkt der Sicherung
+BACKUP DATABASE [Northwind]
+    TO DISK = N'C:\_SQLBACKUP\northwind.bak'
+    WITH NOFORMAT, NOINIT,
+         NAME  = N'Northwind-Vollstaendige-Sicherung',
+         SKIP, NOREWIND, NOUNLOAD,
+         STATS = 10;
 GO
 
-
--- Create the database snapshot
-CREATE DATABASE SnapshotDBName  ON
-( 
-NAME = OrigDB, --der logische Name der Datendatei der OrigDB
-FILENAME = 'C:\_SQLDB\SnapshotDBName.mdf' )
-AS SNAPSHOT OF OrigDB;
+-- Differenzsicherung (Differential Backup)
+-- Sichert nur die Änderungen seit der letzten Vollsicherung → schneller, kleiner
+BACKUP DATABASE [Northwind]
+    TO DISK = N'C:\_SQLBACKUP\northwind.bak'
+    WITH DIFFERENTIAL,
+         NOFORMAT, NOINIT,
+         NAME  = N'Northwind-Differenziell',
+         SKIP, NOREWIND, NOUNLOAD,
+         STATS = 10;
 GO
 
+-- T-Log-Sicherung (Transaction Log Backup)
+-- Leert das Protokoll und ermöglicht minutengenaues Wiederherstellen
+BACKUP LOG [Northwind]
+    TO DISK = N'C:\_SQLBACKUP\northwind.bak'
+    WITH NOFORMAT, NOINIT,
+         NAME  = N'Northwind-TLog',
+         SKIP, NOREWIND, NOUNLOAD,
+         STATS = 10;
+GO
+
+-- ============================================================================
+-- Restore-Szenarien
+-- ============================================================================
+
+/*
+Szenario 1a: Server komplett ausgefallen, Datenträger aber intakt
+    → Datenträgerdateien anfügen (sp_attach_db oder CREATE DATABASE FOR ATTACH)
+    → Kein Restore aus Backup notwendig
+
+Szenario 1b: Datendatei intakt, Protokolldatei defekt
+    → Protokolldatei entfernen, dann anfügen
+    → Es erfolgt ein automatischer Recovery-Prozess
+
+Szenario 1c: Alle Dateien verloren
+    → Backup an den erwarteten Pfad kopieren (spart Zeit beim Restore)
+    → Falls Pfade abweichen: WITH MOVE anpassen
+
+Szenario 2: Datenbank beschädigt
+    → Restore aus Backup mit geringstmöglichem Datenverlust
+    → Protokollfragmentsicherung vor dem Restore!
+
+Szenario 3a: Benutzer hat versehentlich Daten geändert (weiß was betroffen ist)
+    → Datenbank unter anderem Namen wiederherstellen
+    → WITH NORECOVERY verwenden (bis zum gewünschten Zeitpunkt)
+    → Dann gezielt Daten zurückschreiben (INSERT/UPDATE)
+
+Szenario 3b: Benutzer hat etwas geändert (weiß nicht was betroffen ist)
+    → Vollständigen Restore mit Zeitachse
+    → Protokollfragmentsicherung zuerst (BACKUP LOG WITH NO_TRUNCATE)
+
+Szenario 4: Vorsorge vor bekannt riskanter Aktion
+    → Datenbank-Snapshot erstellen! (schnell rückgängig zu machen)
+
+Zeitachsen-Beispiel:
+    06:00  V  Vollsicherung
+    10:00  D  Differenzsicherung
+    10:10  T  T-Log-Sicherung
+    10:20  T
+    10:30  T
+    10:34  !  Fehler tritt auf
+
+  Option A (schnell):  Restore bis 10:30 → Datenverlust: ~4 Minuten
+  Option B (genauer):  Manuelle T-Log-Sicherung um 10:35, dann Restore bis 10:33
+                       → Datenverlust: ~1–2 Minuten
+  Option C (optimal):  Protokollfragmentsicherung + Restore mit STOPAT-Zeit
+                       → Datenverlust: minimal (Sekunden)
+*/
+
+-- ============================================================================
+-- Datenbank-Snapshot als "Notfall-Backup" erstellen
+-- ============================================================================
+USE master;
+GO
+
+-- Snapshot erstellen (kopiert keine Daten – nur Zeiger auf Original-Seiten)
 CREATE DATABASE SN_Northwind_1152 ON
 (
-NAME= Northwind,
-FILENAME = 'C:\_SQLDB\SN_Northwind_1152.mdf'
+    NAME     = Northwind,                      -- logischer Name der Datendatei
+    FILENAME = 'C:\_SQLDB\SN_Northwind_1152.mdf'
 )
 AS SNAPSHOT OF Northwind;
 GO
 
+-- ============================================================================
+-- Datenbank aus Snapshot wiederherstellen
+-- ============================================================================
+-- Alle anderen Snapshots der Originaldatenbank müssen vorher gelöscht werden!
+USE MASTER;
+GO
 
-
-USE MASTER
-
-
-RESTORE DATABASE NORTHWIND from database_Snapshot = 'SN_Northwind_1152' 
-
-
-
-
-
-
-		
+RESTORE DATABASE Northwind
+FROM DATABASE_SNAPSHOT = 'SN_Northwind_1152';
+GO

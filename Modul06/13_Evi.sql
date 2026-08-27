@@ -1,48 +1,82 @@
---Evi
+/*
+================================================================================
+  Modul 06 – Benutzerrechte und Schemas: Demo mit Benutzerin Evi
+================================================================================
+  Dieses Skript demonstriert die Rechtevergabe für einen Datenbankbenutzer
+  namens Evi. Es zeigt, welche Zugriffsrechte auf Schemas und Tabellen
+  vergeben wurden und was zu beachten ist.
 
-select * from customers
+  Szenario:
+  - Evi darf Tabellen im Schema "ma" anlegen
+  - Evi darf Tabellen im Schema "it" lesen (nur Lesezugriff)
+  - Evi darf NICHT auf dbo.Employees zugreifen (explizit verweigert)
 
-select * from ma.personal
+  Wichtige Sicherheitsregel:
+  → Normale Benutzer sollten NIEMALS das Recht erhalten,
+    Views, Prozeduren oder Funktionen zu erstellen!
+  → Begründung: Ein Benutzer mit CREATE VIEW-Rechten kann eine View erstellen,
+    die auf Objekte zugreift, auf die er direkt keinen Zugriff hätte.
+    Damit umgeht er effektiv die Rechteverwaltung!
+================================================================================
+*/
 
-select * from ma.projekte
+-- ============================================================================
+-- Demo: Zugriffstest als Benutzer Evi
+-- ============================================================================
 
-select * from it.projekte
+-- Kunden lesen (allgemeine Tabelle)
+SELECT * FROM Customers;
 
+-- Schema-Zugriff: Mitarbeiterdaten (eigener Bereich)
+SELECT * FROM ma.Personal;
 
---Evi soll Tabellen anlegen d�rfen
+-- Schema-Zugriff: Projekte im MA-Bereich (erlaubt)
+SELECT * FROM ma.Projekte;
 
-create table ma.test (matest int)
+-- Schema-Zugriff: IT-Projekte (nur Lesezugriff)
+SELECT * FROM it.Projekte;
 
---Soll IT Projekte lesen
+-- ============================================================================
+-- Evi legt eine Testtabelle im eigenen Schema an
+-- ============================================================================
+-- (Evi hat CREATE TABLE-Rechte im Schema "ma")
+CREATE TABLE ma.Test (maTest INT);
 
-select * from it.projekte
+-- ============================================================================
+-- Evi versucht Tabellen zu verbinden (View-Erstellung)
+-- ============================================================================
+-- WARNUNG: Dieses Beispiel zeigt, warum CREATE VIEW gefährlich ist!
+CREATE VIEW ma.vProjekte
+AS
+    SELECT * FROM it.Projekte    -- IT-Projekte (Evi hat Lesezugriff)
+    UNION ALL
+    SELECT * FROM ma.Projekte;   -- MA-Projekte (eigener Bereich)
+GO
 
-select * from projekte
+-- View anzeigen (funktioniert, da beide Quellen erlaubt sind)
+SELECT * FROM ma.vProjekte;
 
+-- ============================================================================
+-- Sicherheitsproblem: View zeigt verbotene Daten
+-- ============================================================================
+-- Jetzt ändert Evi die View, um auf dbo.Employees zuzugreifen,
+-- obwohl direkter Zugriff verweigert ist!
+ALTER VIEW ma.vProjekte
+AS
+    SELECT * FROM dbo.Employees;  -- Direkter Zugriff wäre für Evi verboten!
+GO
 
-select * from dbo.employees
+-- Evi kann jetzt trotzdem Employees-Daten über die View lesen:
+SELECT * FROM ma.vProjekte;
 
+-- ============================================================================
+-- Fazit: Sicherheitsregel
+-- ============================================================================
+-- Gewähre niemals einem normalen Benutzer folgende Rechte:
+--   - CREATE VIEW
+--   - CREATE PROCEDURE
+--   - CREATE FUNCTION
+-- → Diese Rechte ermöglichen das Umgehen von Datenzugriffskontrollen!
 
-create view ma.vProjekte
-as
-select * from it.projekte
-UNION ALL
-select * from ma.projekte
-
-
-alter view ma.vProjekte
-as
-select * from dbo.employees
-
---MA Evi darf lesen
---dbo Employees Lesen verweigert
-
-select * from vprojekte
-
---Was sollte man demnach nie tun!
--->Gib nie einem normal sterblichen User das Recht
---Create View / Procedure /function
-select * from ma.projekte
-
-
----Ev
+-- Erlaubter Lesezugriff (MA-Projekte direkt)
+SELECT * FROM ma.Projekte;

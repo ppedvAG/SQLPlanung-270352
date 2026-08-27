@@ -1,36 +1,101 @@
-Funktionen des Query Stores:
-Verfolgen von Abfrageleistung im Zeitverlauf:
+/*
+================================================================================
+  Modul 10 â€“ Query Store (Abfragespeicher)
+================================================================================
+  Der Query Store ist ein Feature in SQL Server (ab Version 2016), das pro
+  Datenbank Abfragen, AusfÃ¼hrungsplÃ¤ne und Laufzeitstatistiken speichert.
+  Die Daten bleiben auch nach einem Neustart des Servers erhalten.
 
-Der Query Store speichert sowohl die Ausführungspläne als auch die Laufzeitstatistiken von Abfragen im Zeitverlauf. Dies erlaubt es, Leistungsprobleme nachzuvollziehen und ihre Entwicklung zu analysieren.
-Plan Regressionsanalyse:
+  Hauptfunktionen:
+  - Abfrageleistung im Zeitverlauf verfolgen
+  - AusfÃ¼hrungsplan-Regression erkennen und beheben (Plan Forcing)
+  - Automatisches Plan-Forcing bei Regression (ab SQL Server 2017)
+  - Diagnose von CPU-, RAM- und I/O-EngpÃ¤ssen pro Abfrage
+  - Verlaufsspeicherung Ã¼ber Datenbankneustarts hinweg
 
-Es kann vorkommen, dass der SQL Server aus unbekannten Gründen einen weniger effizienten Ausführungsplan verwendet. Der Query Store ermöglicht das Zurücksetzen auf frühere, effizientere Pläne, um die Leistung wiederherzustellen.
-Automatisches Plan-Forcing:
+  Architektur:
+  - Daten werden direkt IN der Datenbank gespeichert (nicht in der msdb)
+  - Query Text:          Der SQL-Text der Abfrage
+  - Execution Plans:     Die verwendeten AusfÃ¼hrungsplÃ¤ne
+  - Runtime Statistics:  AusfÃ¼hrungsdauer, CPU, Speicher, I/O
 
-Wenn der Server einen schlechteren Plan wählt, kann der Query Store so konfiguriert werden, dass er automatisch zu einem besseren Plan zurückkehrt, ohne dass der Administrator eingreifen muss.
-Abfrageleistungs-Diagnose:
+  Typischer Workflow:
+  1. Query Store auf der Datenbank aktivieren
+  2. Leistungsdaten Ã¼ber einen Zeitraum sammeln
+  3. Abfragen mit schlechter Leistung oder Plan-Regressionen identifizieren
+  4. Besseren Plan erzwingen (Plan Forcing) oder Abfrage optimieren
 
-Durch das Sammeln von Informationen wie Ausführungszeiten, CPU- und Speicherverbrauch sowie Anzahl der gelesenen und geschriebenen Seiten ist es einfacher, problematische Abfragen zu identifizieren und zu optimieren.
-Verlaufsspeicherung:
+  Vorteile:
+  - Historische Leistungsdaten (nicht nur aktueller Zeitpunkt)
+  - Transparenz Ã¼ber PlanÃ¤nderungen durch Statistik-Updates oder Upgrades
+  - Plan-Forcing ohne DatenbankÃ¤nderungen oder Neustart mÃ¶glich
 
-Der Query Store speichert Daten über mehrere Datenbankneustarts hinweg und bietet so eine konsistente Sicht auf die Performance-Daten.
-Architektur:
-Richtiger Speicherort: Der Query Store speichert seine Daten in der Datenbank selbst.
-Datenquellen: Es gibt zwei Hauptkategorien von Daten:
-Query Text: Der SQL-Text der Abfragen.
-Execution Plans: Die Ausführungspläne, die der Server für die jeweilige Abfrage erstellt hat.
-Laufzeitstatistiken: Informationen wie die Ausführungsdauer, CPU- und Speicherverbrauch.
-Konfiguration und Nutzung:
-Der Query Store kann auf Datenbankebene aktiviert und konfiguriert werden. Dabei können bestimmte Parameter festgelegt werden, wie z.B. wie lange Abfragedaten aufbewahrt werden sollen oder wie viel Speicherplatz für die gesammelten Daten zur Verfügung steht.
+  Hinweis: Der Query Store kann auch als Datenquelle fÃ¼r den
+  Datenbankoptimierungsratgeber (DTA) verwendet werden.
+================================================================================
+*/
 
-Ein typischer Workflow mit dem Query Store sieht so aus:
+-- ============================================================================
+-- Query Store fÃ¼r eine Datenbank aktivieren
+-- ============================================================================
+USE [master];
+GO
 
-Aktivierung des Query Stores auf einer Datenbank.
-Sammeln und Analysieren von Leistungsdaten über einen Zeitraum.
-Identifizierung von regressiven Ausführungsplänen oder Abfragen mit schlechter Leistung.
-Optimierung dieser Abfragen oder Erzwingen besserer Pläne durch Plan-Forcing.
-Vorteile:
-Langfristige Überwachung: Es werden nicht nur aktuelle, sondern auch historische Leistungsdaten gesammelt.
-Transparenz: Der Query Store gibt Einblick in die Arbeitsweise des SQL Servers und macht es einfacher, Leistungsengpässe zu identifizieren und zu beheben.
-Problembehebung ohne Unterbrechung: Durch Plan-Forcing können Probleme oft behoben werden, ohne dass die Datenbank neu gestartet oder andere invasive Maßnahmen ergriffen werden müssen.
-Zusammengefasst ist der Query Store ein unverzichtbares Werkzeug für das Performance-Tuning und die Diagnose von Abfragen in SQL Server-Datenbanken.
+ALTER DATABASE [Northwind] SET QUERY_STORE = ON;
+GO
+
+-- ============================================================================
+-- Query Store konfigurieren
+-- ============================================================================
+ALTER DATABASE [Northwind] SET QUERY_STORE
+(
+    OPERATION_MODE          = READ_WRITE,   -- Aktiv (READ_ONLY zum Einfrieren)
+    CLEANUP_POLICY          = (STALE_QUERY_THRESHOLD_DAYS = 30),  -- Daten 30 Tage behalten
+    DATA_FLUSH_INTERVAL_SECONDS = 900,      -- Alle 15 min in DB schreiben
+    INTERVAL_LENGTH_MINUTES = 60,           -- Statistikintervall: 1 Stunde
+    MAX_STORAGE_SIZE_MB     = 500,          -- Maximale GrÃ¶ÃŸe: 500 MB
+    QUERY_CAPTURE_MODE      = AUTO,         -- Nur relevante Abfragen erfassen
+    SIZE_BASED_CLEANUP_MODE = AUTO          -- Alte Daten automatisch bereinigen
+);
+GO
+
+-- ============================================================================
+-- Query Store Status anzeigen
+-- ============================================================================
+SELECT *
+FROM   sys.database_query_store_options;
+
+-- ============================================================================
+-- Teuerste Abfragen anzeigen (Top 10 nach CPU-Zeit)
+-- ============================================================================
+SELECT TOP (10)
+    q.query_id,
+    qt.query_sql_text                        AS AbfrageText,
+    SUM(rs.avg_cpu_time)                     AS GesamtCPU_ms,
+    SUM(rs.avg_duration)                     AS GesamtDauer_ms,
+    SUM(rs.avg_logical_io_reads)             AS DurchschnittIO,
+    COUNT(rs.execution_count)                AS Planvarianten
+FROM       sys.query_store_query_text  AS qt
+JOIN       sys.query_store_query       AS q  ON qt.query_text_id = q.query_text_id
+JOIN       sys.query_store_plan        AS p  ON q.query_id       = p.query_id
+JOIN       sys.query_store_runtime_stats AS rs ON p.plan_id      = rs.plan_id
+GROUP BY   q.query_id, qt.query_sql_text
+ORDER BY   GesamtCPU_ms DESC;
+
+-- ============================================================================
+-- Plan Forcing: Besten Plan fÃ¼r eine Abfrage erzwingen
+-- ============================================================================
+-- @query_id = ID der Abfrage aus sys.query_store_query
+-- @plan_id  = ID des gewÃ¼nschten Plans aus sys.query_store_plan
+EXEC sys.sp_query_store_force_plan
+    @query_id = 42,   -- Beispiel-ID anpassen!
+    @plan_id  = 7;    -- Beispiel-ID anpassen!
+
+-- Plan-Forcing rÃ¼ckgÃ¤ngig machen
+-- EXEC sys.sp_query_store_unforce_plan @query_id = 42, @plan_id = 7;
+
+-- ============================================================================
+-- Query Store zurÃ¼cksetzen (alle Daten lÃ¶schen)
+-- ============================================================================
+-- ACHTUNG: LÃ¶scht alle gespeicherten Abfragen und Statistiken!
+-- ALTER DATABASE [Northwind] SET QUERY_STORE CLEAR;
