@@ -1,4 +1,17 @@
 /*
+Thema: Indexarten, Wirkung und Wartung in SQL Server.
+Diese Datei gibt einen breiten Überblick über Clustered- und Nonclustered-Indizes.
+Für Anfänger wird erklärt, warum Indizes Leseabfragen stark beschleunigen können.
+Gleichzeitig verursachen sie Zusatzaufwand bei Datenänderungen.
+Das Skript behandelt auch zusammengesetzte und gefilterte Indizes.
+Zusätzlich werden Included Columns und abdeckende Indizes eingeordnet.
+Ein weiterer Schwerpunkt ist Columnstore für analytische Auswertungen.
+Die Beispiele zeigen, wie sich unterschiedliche Indexstrategien im Plan auswirken.
+Außerdem wird erläutert, wann Rebuild oder Reorganize sinnvoll ist.
+Ziel ist ein praxisnahes Verständnis für Auswahl, Nutzen und Pflege von Indizes.
+*/
+
+/*
 
 INDIZES
 

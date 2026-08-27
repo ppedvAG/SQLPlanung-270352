@@ -1,3 +1,16 @@
+/*
+Thema: Fehlende Indizes erkennen und richtig bewerten.
+Diese Datei zeigt, wie SQL Server Vorschläge für fehlende Indizes liefert.
+Solche Hinweise entstehen aus Ausführungsplänen und System-DMVs.
+Wichtig für Anfänger: Ein Vorschlag ist nur ein Hinweis, keine fertige Lösung.
+Die Reihenfolge von Spalten und konkrete Indexart müssen selbst geprüft werden.
+Nicht jeder empfohlene Index verbessert jede Abfrage dauerhaft.
+Außerdem haben zusätzliche Indizes immer Pflegekosten bei INSERT, UPDATE, DELETE.
+Das Skript demonstriert einfache und erweiterte Auswertungen der Rohdaten.
+Damit kann man Prioritäten nach Nutzen, Kosten und Häufigkeit setzen.
+Ziel ist, fundiert zu entscheiden, welche Indizes wirklich erstellt werden sollen.
+*/
+
 
 --Fehlende indizes feststellen
 -- Ausgabe in tatsächlichen Ausführungsplan

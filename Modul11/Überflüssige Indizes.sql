@@ -1,3 +1,16 @@
+/*
+Thema: Überflüssige Indizes identifizieren und abbauen.
+Diese Datei zeigt, wie wenig genutzte Indizes über System-DMVs gefunden werden.
+Für Anfänger ist wichtig: Jeder Index kostet Platz und Schreibaufwand.
+Wenn ein Index kaum gelesen, aber oft aktualisiert wird, ist er kritisch.
+Zu viele Indizes können INSERT, UPDATE und DELETE merklich verlangsamen.
+Die Abfragen vergleichen Nutzungsmuster wie Seeks, Scans und Updates.
+So erkennt man Kandidaten für Bereinigung oder Zusammenführung.
+Gleichzeitig darf man sinnvolle Scans nicht pauschal als schlecht bewerten.
+Entscheidend ist immer der Gesamtnutzen im realen Workload.
+Ziel ist eine schlanke, wirksame und wartbare Indexlandschaft.
+*/
+
 --Überflüssige Indizes identifizieren
 
 --kosten Performance bei INSERT / DELETE

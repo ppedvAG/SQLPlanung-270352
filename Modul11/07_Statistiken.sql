@@ -1,4 +1,17 @@
-﻿Wofür Statistiken?
+/*
+Thema: Statistiken als Grundlage für den SQL Server Optimizer.
+Diese Datei erklärt, warum der Optimizer Schätzungen über Datenverteilungen braucht.
+Ohne gute Statistiken werden Abfragepläne oft langsam oder unpassend.
+Für Anfänger ist zentral: Statistiken steuern die Wahl zwischen Seek und Scan.
+Gezeigt werden Aufbau, Histogramm, Dichte und Aktualisierungsmechanismen.
+Auch automatische und manuelle Updates werden gegenübergestellt.
+Bei großen Tabellen können Stichproben zu ungenauen Schätzungen führen.
+Dann helfen gezielte FULLSCAN- oder Mehrspalten-Statistiken.
+Das Skript enthält Beispiele zum Erzeugen, Prüfen und Interpretieren der Werte.
+So lernst du, wie Statistikqualität direkt die Abfrageleistung beeinflusst.
+*/
+/*
+Wofür Statistiken?
 SQL Server muss bevor die Abfragen ausgeführt werden eine Information besitzten,
 wieviele DAtensätze in etwa zurückkommen werden. Das ist wichtig für die Wahl 
 von IX SEEK oder doch Table_SCAN.
@@ -181,6 +194,7 @@ Bei unbekannten Werten: Dichte oder Defaultschätzung.
 Mehrspaltenstatistiken reduzieren Fehlabschätzungen bei Korrelationen.
 
 	----------------------------------------------
+*/
  --Tabelle erstellen
 DROP TABLE IF EXISTS dbo.Kunden;
 CREATE TABLE dbo.Kunden
@@ -382,5 +396,4 @@ Histogramm: Zeigt konkrete Häufigkeiten einzelner Werte oder Wertbereiche.
 EQ_ROWS: Exakte Treffer für Schlüsselwerte.
 
 RANGE_ROWS: Werte zwischen bekannten Schlüsseln → SQL Server interpoliert.
-
 
