@@ -1,3 +1,16 @@
+/*
+Thema: DB-Design mit Seiten und Blöcken in SQL Server.
+Diese Datei erklärt die physische Speicherung von Daten auf der Festplatte.
+Eine Seite ist die kleinste I/O-Einheit und hat in SQL Server 8 KB.
+Mehrere zusammenhängende Seiten bilden einen Block (Extent).
+Wenn Datensätze zu breit sind, passen weniger Zeilen auf eine Seite.
+Dann steigen Seitenanzahl, Speicherbedarf und Leseaufwand bei Abfragen.
+Für Anfänger ist wichtig: Logisches Design beeinflusst direkt die Performance.
+Die Abfragen in diesem Skript zeigen, wie man Seitennutzung praktisch untersucht.
+Dazu werden klassische und moderne Analysewerkzeuge gegenübergestellt.
+So wird sichtbar, warum Seitendichte und Layout für schnelle Zugriffe wichtig sind.
+*/
+
 ----Seiten und Blöcke
 
 --Seiten und Blöcke
